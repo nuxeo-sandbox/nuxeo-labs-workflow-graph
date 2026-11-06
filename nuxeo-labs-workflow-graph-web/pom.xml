@@ -4,7 +4,7 @@
   <parent>
     <groupId>nuxeo.labs.workflowgraph</groupId>
     <artifactId>nuxeo-labs-workflow-graph-parent</artifactId>
-    <version>2025.1.0-SNAPSHOT</version>
+    <version>2025.2.0-SNAPSHOT</version>
   </parent>
   <artifactId>nuxeo-labs-workflow-graph-web</artifactId>
   <name>Nuxeo Labs Workflow Graph - Web</name>
