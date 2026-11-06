@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!--
+  Recorder of the transitions followed by graph workflows. Synchronous: it reads the transitions evaluated by the
+  workflow engine while the completed step is saved (rnode:endDate set), before the results are reset.
+
+  @since 2025.2
+-->
+<component name="nuxeo.labs.workflowgraph.listener">
+
+  <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+    <listener name="lwgStepCompletedListener" async="false" postCommit="false"
+      class="nuxeo.labs.workflowgraph.StepCompletedListener">
+      <event>beforeDocumentModification</event>
+    </listener>
+  </extension>
+
+</component>

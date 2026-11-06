@@ -19,8 +19,9 @@
 
 /*
  * Core of the workflow graph: namespace, directions (and the memory of the user's choice), translations, text
- * measuring and the conversion of the REST graph (GET /api/v1/workflow/{id}/graph) into the model used by the
- * layout and the renderer.
+ * measuring and the conversion of the REST graph (GET /api/v1/workflow/{id}/graph) and of the history of the
+ * workflow (LabsWorkflowGraph.GetHistory operation, @since 2025.2) into the model used by the layout and the
+ * renderer.
  *
  * No dependency on Polymer or on the DOM (the DOM is only used, when present, to measure text), so the
  * file can be unit tested with Node.
@@ -37,7 +38,7 @@
     return;
   }
   LWG.core = true;
-  LWG.VERSION = '2025.1.0';
+  LWG.VERSION = '2025.2.0';
   LWG.LOG_PREFIX = '[nuxeo-labs-workflow-graph]';
 
   // dagre is loaded right after this file and declares a global "dagre". Remember any previous value so
@@ -128,6 +129,7 @@
     'labsWorkflowGraph.kind.merge': 'Merge',
     'labsWorkflowGraph.current': 'Current',
     'labsWorkflowGraph.currentStep': 'Current step',
+    'labsWorkflowGraph.passedStep': 'Step already done',
     'labsWorkflowGraph.toolbar.zoomIn': 'Zoom in',
     'labsWorkflowGraph.toolbar.zoomOut': 'Zoom out',
     'labsWorkflowGraph.toolbar.zoomLevel': 'Zoom level',
@@ -425,6 +427,50 @@
     edge.labelHeight = m.height;
   }
 
+  /* ==================== History ==================== */
+
+  /*
+   * Checks and cleans the history of a workflow instance: the JSON returned by the LabsWorkflowGraph.GetHistory
+   * operation (server side of the plugin), as an object or a JSON string:
+   *   { workflowId, nodes: [{ id, completed, starts }], transitions: [{ source, index, name, target, count }] }
+   * nodes: the steps that started at least once (completed: they completed at least once). transitions: the
+   * transitions followed at least once, index being their position in their step (definition order, the order of
+   * the graph endpoint).
+   * Returns { nodes, transitions } with the valid entries only, null when the value is not a history.
+   *
+   * @since 2025.2
+   */
+  LWG.normalizeHistory = function (value) {
+    let data = value;
+    if (typeof data === 'string') {
+      try {
+        data = JSON.parse(data);
+      } catch (e) {
+        return null;
+      }
+    }
+    if (!data || typeof data !== 'object' || !Array.isArray(data.nodes) || !Array.isArray(data.transitions)) {
+      return null;
+    }
+    const hasValue = (v) => v !== undefined && v !== null && v !== '';
+    const nodes = data.nodes
+      .filter((n) => n && hasValue(n.id))
+      .map((n) => ({ id: String(n.id), completed: n.completed === true, starts: toNumber(n.starts) }));
+    const transitions = data.transitions
+      .filter((t) => t && hasValue(t.source) && Number.isInteger(t.index) && t.index >= 0)
+      .map((t) => ({
+        source: String(t.source),
+        index: t.index,
+        target: hasValue(t.target) ? String(t.target) : null,
+        count: toNumber(t.count),
+      }));
+    return { nodes, transitions };
+  };
+
+  function historyKey(source, index) {
+    return `${source}\u0000${index}`;
+  }
+
   // Sets edge.colorIndex, see buildModel. The edges are in the order of the definition.
   function assignColors(edges) {
     const count = new Map();
@@ -440,17 +486,34 @@
   /*
    * Converts the JSON of GET /api/v1/workflow/{id}/graph into the model used by the layout and the renderer.
    *
-   * options = { measure: function from createMeasurer(), translate: label translation function }
+   * options = { measure: function from createMeasurer(), translate: label translation function,
+   *             history: history of the workflow (see LWG.normalizeHistory), optional }
    *
    * Returns {
-   *   nodes: [{ id, title, lines, titleTruncated, kind, isCurrent, width, height, studio: { x, y }, index }],
+   *   nodes: [{ id, title, lines, titleTruncated, kind, isCurrent, isPassed, isDimmed, width, height,
+   *             studio: { x, y }, index }],
    *   edges: [{ id, source, target, label, labelText, labelTruncated, labelWidth, labelHeight, isSelfLoop,
-   *             isNext, colorIndex, index }],
-   *   currentNodeIds: [ids], warnings: [strings]
+   *             isNext, isTaken, isDimmed, colorIndex, sourceIndex, index }],
+   *   currentNodeIds: [ids], hasHistory: boolean, warnings: [strings]
    * }
    * A node is current when its state is "suspended" (waiting for its tasks). isNext marks the transitions
    * leaving a current node. Nodes are sorted by their Studio position (top to bottom, then left to right) so
    * the layout starts from the order chosen by the designer.
+   *
+   * With a history (@since 2025.2): isPassed marks the steps completed at least once, isTaken the transitions
+   * followed at least once. The current look wins: a current step is never passed, a transition leaving a current
+   * step is never taken. sourceIndex is the position of the transition in its step (definition order, the ignored
+   * transitions included), used to match the history; a followed transition whose target differs from the graph
+   * is ignored with a warning.
+   * isDimmed marks the branches not followed: what was not done and cannot happen anymore. A step is dimmed when
+   * it was never reached (not current, not waiting (merge), not in the history (never started), not the target of
+   * a followed transition) and cannot be reached anymore (no transition leads to it from a current or a waiting
+   * step, loops included): the steps still to come keep their look. A transition is dimmed when it is not next nor
+   * followed and its source is dimmed, or its source cannot be reached anymore and its target was never reached
+   * (so it was never followed). A transition between two reached steps that was not recorded is not dimmed: it may
+   * have been followed before the transitions were recorded. When the workflow is done (no current step), every
+   * step never reached is dimmed. Without a history, nothing is dimmed. The steps come from their documents, so
+   * the dimming also works for the workflows started before the transitions were recorded.
    *
    * colorIndex tells the transitions leaving the same step apart, as Web UI's default graph does: 0 when the
    * step has a single transition (neutral color), otherwise 1 to TRANSITION_COLOR_COUNT from the rank of the
@@ -466,6 +529,20 @@
     const warnings = [];
     const rawNodes = (graph && Array.isArray(graph.nodes) && graph.nodes) || [];
     const rawTransitions = (graph && Array.isArray(graph.transitions) && graph.transitions) || [];
+    const history = opts.history ? LWG.normalizeHistory(opts.history) : null;
+    if (opts.history && !history) {
+      warnings.push('Invalid workflow history, ignored');
+    }
+    const completed = new Set(history ? history.nodes.filter((n) => n.completed).map((n) => n.id) : []);
+    // started at least once (the history lists the steps started or completed)
+    const started = new Set(history ? history.nodes.map((n) => n.id) : []);
+    // merge steps waiting for other branches, and targets of followed transitions: reached as well
+    const waiting = new Set();
+    const followedTargets = new Set();
+    // followed transitions: source and position in the source -> target
+    const followed = new Map(
+      history ? history.transitions.map((t) => [historyKey(t.source, t.index), t.target]) : [],
+    );
 
     const nodes = [];
     const byId = new Map();
@@ -483,11 +560,14 @@
         return;
       }
       const kind = LWG.nodeKind(raw);
+      const isCurrent = raw.state === 'suspended';
       const node = {
         id,
         title: translate(raw.title) || id,
         kind,
-        isCurrent: raw.state === 'suspended',
+        isCurrent,
+        isPassed: !isCurrent && completed.has(id),
+        isDimmed: false,
         studio: { x: toNumber(raw.x), y: toNumber(raw.y) },
         index,
       };
@@ -496,18 +576,38 @@
       } else {
         sizeCard(node, measure);
       }
+      if (raw.state === 'waiting') {
+        waiting.add(id);
+      }
       byId.set(id, node);
       nodes.push(node);
     });
     nodes.sort((a, b) => a.studio.y - b.studio.y || a.studio.x - b.studio.x || a.index - b.index);
 
     const edges = [];
+    const sourceCount = new Map();
     rawTransitions.forEach((raw, index) => {
       const source = raw && raw.nodeSourceId !== undefined ? String(raw.nodeSourceId) : '';
       const target = raw && raw.nodeTargetId !== undefined ? String(raw.nodeTargetId) : '';
+      // position in the step, as counted by the server (the ignored transitions included)
+      const sourceIndex = sourceCount.get(source) || 0;
+      sourceCount.set(source, sourceIndex + 1);
+      const key = historyKey(source, sourceIndex);
+      const followedTarget = followed.get(key);
+      const wasFollowed = followed.delete(key);
       if (!byId.has(source) || !byId.has(target)) {
         warnings.push(`Transition #${index} (${source} -> ${target}) references an unknown node, ignored`);
         return;
+      }
+      const isNext = byId.get(source).isCurrent;
+      let isTaken = wasFollowed && !isNext;
+      if (wasFollowed && followedTarget !== null && followedTarget !== target) {
+        warnings.push(
+          `History: transition #${sourceIndex} of ${source} goes to ${target}, not to ${followedTarget}, ignored`,
+        );
+        isTaken = false;
+      } else if (wasFollowed) {
+        followedTargets.add(target);
       }
       const edge = {
         id: `e${index}`,
@@ -515,18 +615,49 @@
         target,
         label: translate(raw.label),
         isSelfLoop: source === target,
-        isNext: byId.get(source).isCurrent,
+        isNext,
+        isTaken,
+        isDimmed: false,
+        sourceIndex,
         index,
       };
       sizeLabel(edge, measure);
       edges.push(edge);
     });
     assignColors(edges);
+    if (followed.size) {
+      warnings.push(`History: ${followed.size} followed transition(s) not found in the graph, ignored`);
+    }
+    if (history) {
+      // the steps that can still happen: the current ones, the merges waiting for other branches, and every step a
+      // transition leads to from them (loops included)
+      const future = new Set(nodes.filter((n) => n.isCurrent || waiting.has(n.id)).map((n) => n.id));
+      const targetsOf = new Map();
+      edges.forEach((e) => targetsOf.set(e.source, (targetsOf.get(e.source) || []).concat(e.target)));
+      const todo = Array.from(future);
+      while (todo.length) {
+        (targetsOf.get(todo.pop()) || []).forEach((t) => {
+          if (!future.has(t)) {
+            future.add(t);
+            todo.push(t);
+          }
+        });
+      }
+      const reached = (id) => byId.get(id).isCurrent || started.has(id) || waiting.has(id) || followedTargets.has(id);
+      nodes.forEach((n) => {
+        n.isDimmed = !reached(n.id) && !future.has(n.id);
+      });
+      edges.forEach((e) => {
+        const neverFollowed = byId.get(e.source).isDimmed || (!future.has(e.source) && !reached(e.target));
+        e.isDimmed = !e.isNext && !e.isTaken && neverFollowed;
+      });
+    }
 
     return {
       nodes,
       edges,
       currentNodeIds: nodes.filter((n) => n.isCurrent).map((n) => n.id),
+      hasHistory: !!history,
       warnings,
     };
   };

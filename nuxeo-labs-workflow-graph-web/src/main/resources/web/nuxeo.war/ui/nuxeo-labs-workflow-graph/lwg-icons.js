@@ -42,6 +42,8 @@
     subWorkflow: 'M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z',
     fork: 'M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3z',
     merge: 'M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z',
+    // badge of the steps already done (@since 2025.2)
+    check: 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
     zoomIn: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
     zoomOut: 'M19 13H5v-2h14v2z',
     fit:

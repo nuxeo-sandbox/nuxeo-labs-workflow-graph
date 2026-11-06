@@ -20,7 +20,7 @@
 /*
  * Renders the demo (dev/demo/index.html) in headless Chrome for every sample and theme, fails on any console
  * error or warning, writes the screenshots to dev/out/demo/, then checks the view interactions (initial view,
- * keys, toolbar, wheel, drag, no animation, read-only steps).
+ * keys, toolbar, wheel, drag, no animation, read-only steps) and the history (steps done, transitions followed).
  *     LWG_NODE_MODULES=... CHROME_PATH=... node dev/tools/screenshots.mjs [filter]
  * The optional filter keeps the cases whose name contains it (e.g. "serial-default"); "checks" runs the
  * interaction checks only.
@@ -42,6 +42,9 @@ for (const wf of ['serial', 'parallel', 'subWorkflow', 'contract', 'large']) {
 }
 cases.push({ name: 'contract-hyland-dark-LR', query: { wf: 'contract', theme: 'hyland-dark', dir: 'LR' } });
 cases.push({ name: 'serial-dark-fr', query: { wf: 'serial', theme: 'dark', lang: 'fr', dir: 'TB' } });
+for (const wf of ['serial', 'contract']) {
+  cases.push({ name: `${wf}-default-nohistory`, query: { wf, theme: 'default', dir: 'TB', history: 'off' } });
+}
 cases.push({
   name: 'contract-default-small',
   query: { wf: 'contract', theme: 'default', dir: 'TB' },
@@ -117,10 +120,14 @@ async function screenshots() {
       edges: document.querySelectorAll('.lwg-edge').length,
       current: document.querySelectorAll('.lwg-node.is-current').length,
       next: document.querySelectorAll('.lwg-edge.is-next').length,
+      passed: document.querySelectorAll('.lwg-node.is-passed').length,
+      taken: document.querySelectorAll('.lwg-edge.is-taken').length,
+      dimmed: document.querySelectorAll('.lwg-node.is-dimmed').length,
       scale: window.renderer.transform.scale,
     }));
     report(c.name, errors, `${stats.nodes} steps, ${stats.edges} transitions, ${stats.current} current, `
-      + `${stats.next} next, zoom ${Math.round(stats.scale * 100)}%`);
+      + `${stats.next} next, ${stats.passed} done, ${stats.taken} followed, ${stats.dimmed} dimmed, `
+      + `zoom ${Math.round(stats.scale * 100)}%`);
     await page.close();
   }
 }
@@ -198,7 +205,8 @@ async function checkLargeGraph() {
 }
 
 async function checkSmallGraph() {
-  const { page, errors } = await open({ query: { wf: 'serial', theme: 'default' } });
+  // without the history: the colors checked here are those of the palette
+  const { page, errors } = await open({ query: { wf: 'serial', theme: 'default', history: 'off' } });
   const expect = (cond, message) => cond || errors.push(message);
 
   let s = await viewState(page);
@@ -318,6 +326,198 @@ async function checkSmallGraph() {
   await page.close();
 }
 
+// Brightness (0 to 255) of a computed color: rgb(r, g, b) or, for color-mix(), color(srgb r g b) from 0 to 1.
+function rgbOf(c) {
+  const values = c.match(/\d+(\.\d+)?/g).slice(-3).map(Number);
+  return c.includes('color(srgb') ? values.map((v) => v * 255) : values;
+}
+
+function brightness(c) {
+  const [r, g, b] = rgbOf(c);
+  return (r + g + b) / 3;
+}
+
+// Steps done and transitions followed (serial: Start and Choose Participants done, the current step was rejected
+// once), drawn in the color of the trail; branches not followed dimmed.
+function historyState(page) {
+  return page.evaluate(() => {
+    const line = (e) => getComputedStyle(e.querySelector('.lwg-edge-line'));
+    const arrowWidth = (e) => {
+      const n = e.querySelector('.lwg-edge-arrow').getAttribute('d').match(/-?\d+(\.\d+)?/g).map(Number);
+      return Math.hypot(n[2] - n[6], n[3] - n[7]);
+    };
+    const edge = (e) => ({
+      cls: e.getAttribute('class'),
+      stroke: line(e).stroke,
+      arrow: getComputedStyle(e.querySelector('.lwg-edge-arrow')).fill,
+      width: parseFloat(line(e).strokeWidth),
+      arrowWidth: arrowWidth(e),
+    });
+    const passed = Array.from(document.querySelectorAll('.lwg-node.is-passed'));
+    const check = document.querySelector('.lwg-node.is-passed .lwg-node-check');
+    return {
+      passed: passed.map((n) => n.dataset.id).sort(),
+      // the border is thicker, the size does not change
+      sizes: passed.every(
+        (n) => n.offsetWidth === parseFloat(n.style.width) && n.offsetHeight === parseFloat(n.style.height),
+      ),
+      checks: passed.filter((n) => n.querySelector('.lwg-node-check[role="img"] svg')).length,
+      checkLabel: check && check.getAttribute('aria-label'),
+      checkColor: check && getComputedStyle(check).backgroundColor,
+      passedBorders: passed.map((n) => `${getComputedStyle(n).borderTopWidth} ${getComputedStyle(n).borderTopColor}`),
+      plainBorder: getComputedStyle(document.querySelector('.lwg-node:not(.is-passed):not(.is-current)'))
+        .borderTopColor,
+      currentDone: document.querySelectorAll('.lwg-node.is-current.is-passed, .lwg-node.is-current .lwg-node-check')
+        .length,
+      taken: Array.from(document.querySelectorAll('.lwg-edge.is-taken')).map(edge),
+      takenLabels: Array.from(document.querySelectorAll('.lwg-label.is-taken')).map((l) => l.textContent),
+      next: Array.from(document.querySelectorAll('.lwg-edge.is-next')).map(edge),
+      others: Array.from(document.querySelectorAll('.lwg-edge:not(.is-next):not(.is-taken)')).map(edge),
+      // drawn order: the dimmed transitions first, then the others, the followed ones, the next ones last
+      order: Array.from(document.querySelectorAll('.lwg-edge')).map((e) => {
+        const c = e.classList;
+        return c.contains('is-next') ? 3 : c.contains('is-taken') ? 2 : c.contains('is-dimmed') ? 0 : 1;
+      }),
+      dimmed: Array.from(document.querySelectorAll('.lwg-node.is-dimmed')).map((n) => n.dataset.id).sort(),
+      dimmedOpacity: Array.from(document.querySelectorAll('.lwg-node.is-dimmed')).map(
+        (n) => getComputedStyle(n).opacity,
+      ),
+      otherOpacity: Array.from(document.querySelectorAll('.lwg-node:not(.is-dimmed)')).map(
+        (n) => getComputedStyle(n).opacity,
+      ),
+      dimmedEdges: Array.from(document.querySelectorAll('.lwg-edge.is-dimmed')).map((e) => ({
+        cls: e.getAttribute('class'),
+        opacity: getComputedStyle(e).opacity,
+      })),
+      dimmedLabels: Array.from(document.querySelectorAll('.lwg-label.is-dimmed')).map((l) => {
+        const style = getComputedStyle(l);
+        return { text: l.textContent, color: style.color, border: style.borderTopColor, bg: style.backgroundColor };
+      }),
+      // text color of a plain label (all the labels of the sample are dimmed, next or followed)
+      plainLabel: (() => {
+        const tmp = document.createElement('div');
+        tmp.className = 'lwg-label';
+        document.querySelector('.lwg-labels').appendChild(tmp);
+        const color = getComputedStyle(tmp).color;
+        tmp.remove();
+        return color;
+      })(),
+      // background of the cards (the toolbar uses it too, the Start / End pills are tinted)
+      cardBg: getComputedStyle(document.querySelector('.lwg-toolbar')).backgroundColor,
+    };
+  });
+}
+
+async function checkHistory() {
+  const { page, errors } = await open({ query: { wf: 'serial', theme: 'default' } });
+  const expect = (cond, message) => cond || errors.push(message);
+
+  let h = await historyState(page);
+  expect(h.passed.join() === 'Task375f,Task38e', `steps done: ${h.passed}`);
+  expect(h.sizes, 'a step done does not keep its size');
+  expect(h.checks === 2 && h.checkLabel === 'Step already done', `check badges: ${h.checks}, ${h.checkLabel}`);
+  expect(h.currentDone === 0, 'the current step (done once) is shown as done');
+  expect(h.passedBorders.every((b) => b.startsWith('2px ') && !b.endsWith(h.plainBorder)),
+    `borders of the steps done: ${h.passedBorders}, other steps: ${h.plainBorder}`);
+  expect(h.takenLabels.sort().join() === 'Review Start,start', `followed labels: ${h.takenLabels}`);
+  expect(h.taken.length === 2 && h.taken.every((e) => e.stroke === h.checkColor && e.arrow === h.checkColor),
+    `followed transitions are not in the color of the trail (${h.checkColor}): ${JSON.stringify(h.taken)}`);
+  // "Review Start" has a palette color (its step has two transitions): the trail color wins
+  expect(h.taken.some((e) => /\blwg-tc-2\b/.test(e.cls)), `followed classes: ${h.taken.map((e) => e.cls)}`);
+  // the current step followed "Rejection" before: it is a next transition, not a followed one
+  expect(h.next.length === 4 && h.next.every((e) => !/is-taken/.test(e.cls)), `next: ${h.next.map((e) => e.cls)}`);
+  // lines and arrow heads: thicker than the others, thinner than the next transitions
+  for (const key of ['width', 'arrowWidth']) {
+    const values = (list) => list.map((e) => e[key]);
+    expect(Math.min(...values(h.taken)) > Math.max(...values(h.others))
+      && Math.max(...values(h.taken)) < Math.min(...values(h.next)),
+      `${key}: followed ${values(h.taken)}, others ${values(h.others)}, next ${values(h.next)}`);
+  }
+  expect(h.order.join('') === [...h.order].sort().join(''), `drawing order: ${h.order.join('')}`);
+
+  // the steps still to come (Update the Document, Stop) are not dimmed; the "Cancelation" of Choose Participants,
+  // a branch not followed, is
+  expect(h.dimmed.length === 0 && h.otherOpacity.every((o) => o === '1'), `dimmed steps: ${h.dimmed}`);
+  expect(h.dimmedLabels.map((l) => l.text).join() === 'Cancelation' && h.dimmedEdges.length === 1,
+    `dimmed transitions: ${JSON.stringify(h.dimmedEdges)}, labels: ${h.dimmedLabels.map((l) => l.text)}`);
+
+  // a trail color set on html is used by the badge, the steps, the lines, the arrows and the labels
+  const red = 'rgb(200, 0, 0)';
+  await page.evaluate((c) => document.documentElement.style.setProperty('--lwg-passed', c), red);
+  h = await historyState(page);
+  const label = await page.evaluate(
+    () => getComputedStyle(document.querySelector('.lwg-label.is-taken')).borderTopColor,
+  );
+  expect(h.checkColor === red && h.taken.every((e) => e.stroke === red && e.arrow === red),
+    `--lwg-passed set on html is not used (${h.checkColor}, ${h.taken.map((e) => e.stroke)})`);
+  // borders: a mix of the trail color and the card background
+  const reddish = (c) => {
+    const [r, g, b] = rgbOf(c);
+    return r > g + 60 && r > b + 60;
+  };
+  expect(reddish(label) && h.passedBorders.every(reddish), `label border ${label}, step borders ${h.passedBorders}`);
+  await page.evaluate(() => document.documentElement.style.removeProperty('--lwg-passed'));
+
+  // kept when the direction changes
+  await page.evaluate(() => window.renderer.setDirection('LR'));
+  h = await historyState(page);
+  expect(h.passed.length === 2 && h.taken.length === 2, `LR: ${h.passed.length} done, ${h.taken.length} followed`);
+  await page.close();
+
+  // parallel: the Stop after "Cancelation" (a branch not followed) is dimmed, the two Stops after the review are not
+  const parallel = await open({ query: { wf: 'parallel', theme: 'default' } });
+  let p = await historyState(parallel.page);
+  expect(p.dimmed.join() === 'Task2225', `parallel, dimmed steps: ${p.dimmed}`);
+  expect(p.dimmedOpacity.every((o) => o === '0.4') && p.otherOpacity.every((o) => o === '1'),
+    `parallel, opacities: dimmed ${p.dimmedOpacity}, others ${p.otherOpacity}`);
+  expect(p.dimmedEdges.length === 1 && p.dimmedEdges.every((e) => near(Number(e.opacity), 0.32, 0.001)),
+    `parallel, dimmed transitions: ${JSON.stringify(p.dimmedEdges)}`);
+  expect(p.dimmedEdges.every((e) => !/is-next|is-taken/.test(e.cls)), 'a next or followed transition is dimmed');
+  // labels: opaque (their transition passes below), text lighter than the other labels, a border of their own
+  const labels = p.dimmedLabels;
+  expect(labels.map((l) => l.text).join() === 'Cancelation'
+    && labels.every((l) => l.bg === p.cardBg && brightness(l.color) > brightness(p.plainLabel) + 40
+      && l.border !== l.color),
+    `dimmed labels: ${JSON.stringify(labels)}, other labels: ${p.plainLabel}, cards: ${p.cardBg}`);
+  // the strength of the dimming can be changed
+  await parallel.page.evaluate(() => document.documentElement.style.setProperty('--lwg-dimmed-opacity', '0.7'));
+  p = await historyState(parallel.page);
+  expect(p.dimmedOpacity.every((o) => o === '0.7') && p.dimmedEdges.every((e) => near(Number(e.opacity), 0.56, 0.001)),
+    `--lwg-dimmed-opacity set on html is not used: ${p.dimmedOpacity}, ${p.dimmedEdges.map((e) => e.opacity)}`);
+  parallel.errors.forEach((e) => errors.push(e));
+  await parallel.page.close();
+
+  // the large sample: every step done (except the current ones) and every transition followed is shown; only the
+  // rejection of phase 4 (a branch not followed) is dimmed, the phases still to come are not
+  const large = await open({ query: { wf: 'large', theme: 'default' } });
+  const counts = await large.page.evaluate(() => {
+    const s = window.LWG_SAMPLES.large;
+    const current = s.graph.nodes.filter((n) => n.state === 'suspended').map((n) => n.id);
+    return {
+      expectedPassed: s.history.nodes.filter((n) => n.completed && !current.includes(n.id)).length,
+      expectedTaken: s.history.transitions.filter((t) => !current.includes(t.source)).length,
+      passed: document.querySelectorAll('.lwg-node.is-passed').length,
+      taken: document.querySelectorAll('.lwg-edge.is-taken').length,
+      dimmed: Array.from(document.querySelectorAll('.lwg-node.is-dimmed')).map((n) => n.dataset.id).join(),
+      dimmedEdges: document.querySelectorAll('.lwg-edge.is-dimmed').length,
+    };
+  });
+  expect(counts.passed === counts.expectedPassed && counts.taken === counts.expectedTaken
+    && counts.dimmed === 'l-rejected' && counts.dimmedEdges === 1, `large: ${JSON.stringify(counts)}`);
+  large.errors.forEach((e) => errors.push(e));
+  await large.page.close();
+
+  // without the history, nothing is marked
+  const off = await open({ query: { wf: 'serial', theme: 'default', history: 'off' } });
+  const none = await off.page.evaluate(() =>
+    document.querySelectorAll('.lwg-node-check, .is-passed, .is-taken, .is-dimmed').length,
+  );
+  expect(none === 0, `history off: ${none} marked element(s)`);
+  off.errors.forEach((e) => errors.push(e));
+  await off.page.close();
+  report('checks: history (steps done, transitions followed, branches not followed, colors, sizes, order)', errors);
+}
+
 // Layout orientation and toolbar state of the page.
 function directionState(page) {
   return page.evaluate(() => {
@@ -434,6 +634,7 @@ try {
   if (!filter || filter === 'checks') {
     await checkLargeGraph();
     await checkSmallGraph();
+    await checkHistory();
     await checkDirection();
   }
 } finally {

@@ -26,6 +26,9 @@
  *
  * Node titles and transition labels are already translated, as the server does with its messages bundle
  * (untranslated keys such as "automatic_transition" are returned as is).
+ *
+ * Each sample also has a history, as returned by the LabsWorkflowGraph.GetHistory operation (steps already done,
+ * transitions already followed), shown by the demo unless "history=off".
  */
 (function (root) {
   'use strict';
@@ -53,6 +56,28 @@
     return { nodeSourceId: source, nodeTargetId: target, label, path: [] };
   }
 
+  /*
+   * History of a sample, in the format of the LabsWorkflowGraph.GetHistory operation. done: ids of the steps
+   * completed at least once; followed: [source, label] of the transitions followed at least once (index is their
+   * position in the source, as counted by the server). The current steps are listed as started.
+   */
+  function history(graph, done, followed) {
+    const current = graph.nodes.filter((n) => n.state === 'suspended').map((n) => n.id);
+    const nodes = done.map((id) => ({ id, completed: true, starts: current.includes(id) ? 2 : 1 }));
+    current
+      .filter((id) => !done.includes(id))
+      .forEach((id) => nodes.push({ id, completed: false, starts: 1 }));
+    const transitions = followed.map(([source, label]) => {
+      const fromSource = graph.transitions.filter((t) => t.nodeSourceId === source);
+      const index = fromSource.findIndex((t) => t.label === label);
+      if (index < 0) {
+        throw new Error(`No transition "${label}" from ${source}`);
+      }
+      return { source, index, name: `${source}-${index}`, target: fromSource[index].nodeTargetId, count: 1 };
+    });
+    return { workflowId: 'demo', nodes, transitions };
+  }
+
   const serial = {
     label: 'Serial Document Review',
     title: 'wf.serialDocumentReview.SerialDocumentReview',
@@ -78,6 +103,16 @@
       ],
     },
   };
+  // the current step (Validate) was rejected once: done, but shown as current
+  serial.history = history(
+    serial.graph,
+    ['Task375f', 'Task38e', 'Task6d8'],
+    [
+      ['Task375f', 'start'],
+      ['Task38e', 'Review Start'],
+      ['Task6d8', 'Rejection'],
+    ],
+  );
 
   const parallel = {
     label: 'Parallel Document Review',
@@ -103,6 +138,14 @@
       ],
     },
   };
+  parallel.history = history(
+    parallel.graph,
+    ['Task21a0', 'Task2556'],
+    [
+      ['Task21a0', 'automatic_transition'],
+      ['Task2556', 'Review start'],
+    ],
+  );
 
   const subWorkflow = {
     label: 'MainWF (sub-workflow)',
@@ -123,6 +166,7 @@
       ],
     },
   };
+  subWorkflow.history = history(subWorkflow.graph, ['start-node'], [['start-node', 'automatic_transition']]);
 
   const contract = {
     label: 'Contract Approval (synthetic)',
@@ -171,9 +215,23 @@
       ],
     },
   };
+  // the legal review requested changes once, finance approved with reservations, the merge waits for the legal review
+  contract.history = history(
+    contract.graph,
+    ['n-start', 'n-prepare', 'n-fork', 'n-legal', 'n-finance'],
+    [
+      ['n-start', 'automatic_transition'],
+      ['n-prepare', 'Submit'],
+      ['n-fork', 'Legal'],
+      ['n-fork', 'Finance'],
+      ['n-legal', 'Changes requested'],
+      ['n-finance', 'Approved with reservations'],
+    ],
+  );
 
   // 8 phases of 7 steps (prepare, fork, 3 reviews, merge, check) between a start and two ends. Phase 5 is
-  // running: its reviews by teams 1 and 3 are the current steps.
+  // running: its reviews by teams 1 and 3 are the current steps, the team 2 is done, so its merge is waiting.
+  // Only the quality check of phase 4 can reject the project: a branch not followed, it cannot happen anymore.
   function buildLarge() {
     const nodes = [node('l-start', 'Start', 400, 0, 'ready', { isStartNode: true })];
     const transitions = [];
@@ -184,7 +242,7 @@
       nodes.push(
         node(id('prepare'), `Phase ${p}: prepare the deliverables`, 380, y, 'ready'),
         node(id('fork'), `Phase ${p}: reviews`, 400, y + 100, 'ready', { isForkNode: true }),
-        node(id('merge'), `Phase ${p}: reviews done`, 400, y + 300, 'ready', { isMerge: true }),
+        node(id('merge'), `Phase ${p}: reviews done`, 400, y + 300, p === 5 ? 'waiting' : 'ready', { isMerge: true }),
         node(id('check'), `Phase ${p}: quality check`, 380, y + 400, 'ready'),
       );
       transitions.push(
@@ -212,9 +270,31 @@
     transitions.push(
       tr(previous, 'l-stop', 'Approved'),
       tr('l-p4-check', 'l-rejected', 'Rejected'),
-      tr('l-p7-check', 'l-rejected', 'Rejected'),
     );
     return { 'entity-type': 'graph', nodes, transitions };
+  }
+
+  // Phases 1 to 4 are done (phase 2 was reworked once), in phase 5 the team 2 has done its review.
+  function buildLargeHistory(graph) {
+    const done = ['l-start'];
+    const followed = [['l-start', 'automatic_transition']];
+    for (let p = 1; p <= 5; p++) {
+      const id = (s) => `l-p${p}-${s}`;
+      done.push(id('prepare'), id('fork'));
+      followed.push([id('prepare'), 'Submit'], [id('fork'), 'Team 1'], [id('fork'), 'Team 2'], [id('fork'), 'Team 3']);
+      if (p === 5) {
+        done.push(id('review2'));
+        followed.push([id('review2'), 'Done']);
+        break;
+      }
+      done.push(id('review1'), id('review2'), id('review3'), id('merge'), id('check'));
+      followed.push([id('review1'), 'Done'], [id('review2'), 'Done'], [id('review3'), 'Done'], [id('merge'), '']);
+      followed.push([id('check'), 'Approved']);
+      if (p === 2) {
+        followed.push([id('check'), 'Rework']);
+      }
+    }
+    return history(graph, done, followed);
   }
 
   const large = {
@@ -222,6 +302,7 @@
     title: 'Large project',
     graph: buildLarge(),
   };
+  large.history = buildLargeHistory(large.graph);
 
   const samples = { serial, parallel, subWorkflow, contract, large };
 

@@ -27,6 +27,8 @@
  *
  *   const renderer = new LWG.Renderer(containerElement, { onDirectionChange(direction) {...} });
  *   renderer.setGraph(jsonOfWorkflowGraphEndpoint, { direction: 'LR' });   // throws if the layout fails
+ *   renderer.setGraph(graph, { history: jsonOfGetHistoryOperation });       // steps done, transitions followed,
+ *                                                                           // branches not followed dimmed
  *
  * Steps and labels are HTML elements (crisp text), transitions are SVG paths below them. Every position comes
  * from the layout, nothing is read back from the DOM, so the graph can be built while hidden.
@@ -50,6 +52,8 @@
   // Bigger arrow heads for the thicker transitions leaving a current step (stroke widths in lwg-styles.js). The
   // width must stay below the gap between nested self-loops (selfLoop in lwg-layout.js).
   const NEXT_ARROW = Object.freeze({ length: 13, width: 11, shorten: 8.5 });
+  // Transitions already followed: between the two (@since 2025.2).
+  const TAKEN_ARROW = Object.freeze({ length: 11, width: 10, shorten: 7.5 });
   const MIN_SCALE = 0.05;
   const MAX_SCALE = 2.5;
   const ZOOM_STEP = 1.25;
@@ -128,12 +132,19 @@
 
     /* ==================== Public API ==================== */
 
-    // Builds the model, computes the layout and draws. options: { direction: 'TB' | 'LR' }, TB by default.
-    // Throws when the layout cannot be computed.
+    /*
+     * Builds the model, computes the layout and draws. Throws when the layout cannot be computed.
+     * options: { direction: 'TB' | 'LR' (TB by default), history: history of the workflow, optional (steps already
+     * done and transitions already followed, see LWG.normalizeHistory) }
+     */
     setGraph(graph, options) {
-      const direction = LWG.normalizeDirection(options && options.direction);
+      const opts = options || {};
+      const direction = LWG.normalizeDirection(opts.direction);
       const family = root.getComputedStyle ? root.getComputedStyle(this.container).fontFamily : '';
-      const model = LWG.buildModel(graph, { measure: LWG.createMeasurer(family || LWG.DEFAULT_FONT_FAMILY) });
+      const model = LWG.buildModel(graph, {
+        measure: LWG.createMeasurer(family || LWG.DEFAULT_FONT_FAMILY),
+        history: opts.history || null,
+      });
       if (model.warnings.length) {
         console.warn(LWG.LOG_PREFIX, model.warnings.join('; '));
       }
@@ -335,9 +346,12 @@
       this.emptyEl.hidden = model.nodes.length > 0;
       this._btnCenter.hidden = !model.currentNodeIds.length;
 
-      // The transitions leaving the current step(s) are drawn last, on top of the others.
-      const edges = model.edges.filter((e) => !e.isNext).concat(model.edges.filter((e) => e.isNext));
-      edges.forEach((e) => this._renderEdge(e, layout.edges[e.id]));
+      // Drawing order: the dimmed transitions first, then the others, the ones already followed, and the ones leaving
+      // the current step(s) last, on top.
+      const rank = (e) => (e.isNext ? 3 : e.isTaken ? 2 : e.isDimmed ? 0 : 1);
+      [0, 1, 2, 3].forEach((r) =>
+        model.edges.filter((e) => rank(e) === r).forEach((e) => this._renderEdge(e, layout.edges[e.id])),
+      );
 
       // DOM order follows the reading order of the layout
       const pos = (n) => layout.nodes[n.id];
@@ -358,11 +372,13 @@
       const points = route.points.map((p) => ({ x: p.x + PAD, y: p.y + PAD }));
       const tip = points[points.length - 1];
       const from = points[points.length - 2];
-      const arrow = e.isNext ? NEXT_ARROW : ARROW;
+      const arrow = e.isNext ? NEXT_ARROW : e.isTaken ? TAKEN_ARROW : ARROW;
       const line = G.shortenEnd(points, arrow.shorten);
       const d = route.curve === 'rounded' ? G.roundedPath(line, 10) : G.basisPath(line);
-      // is-next: leaves a current step; lwg-tc lwg-tc-N: color of the palette (its step has several transitions)
-      const state = `${e.isNext ? ' is-next' : ''}${e.colorIndex ? ` lwg-tc lwg-tc-${e.colorIndex}` : ''}`;
+      // is-next: leaves a current step; is-taken: already followed; is-dimmed: never followed and cannot be followed
+      // anymore; lwg-tc lwg-tc-N: color of the palette (its step has several transitions)
+      const flags = `${e.isNext ? ' is-next' : ''}${e.isTaken ? ' is-taken' : ''}${e.isDimmed ? ' is-dimmed' : ''}`;
+      const state = `${flags}${e.colorIndex ? ` lwg-tc lwg-tc-${e.colorIndex}` : ''}`;
       const g = svgEl('g', { class: `lwg-edge${state}` });
       g.append(
         svgEl('path', { class: 'lwg-edge-line', d }),
@@ -388,6 +404,8 @@
       const elem = el('div', `lwg-node lwg-kind-${n.kind}${terminal ? ' lwg-terminal' : ''}`);
       elem.dataset.id = n.id;
       elem.classList.toggle('is-current', n.isCurrent);
+      elem.classList.toggle('is-passed', !!n.isPassed);
+      elem.classList.toggle('is-dimmed', !!n.isDimmed);
       elem.style.left = `${p.x + PAD - n.width / 2}px`;
       elem.style.top = `${p.y + PAD - n.height / 2}px`;
       elem.style.width = `${n.width}px`;
@@ -416,6 +434,11 @@
         badge.textContent = LWG.t('labsWorkflowGraph.current');
         badge.title = LWG.t('labsWorkflowGraph.currentStep');
         elem.appendChild(badge);
+      } else if (n.isPassed) {
+        const label = LWG.t('labsWorkflowGraph.passedStep');
+        const check = el('div', 'lwg-node-check', { role: 'img', 'aria-label': label, title: label });
+        check.appendChild(LWG.createIcon('check'));
+        elem.appendChild(check);
       }
       return elem;
     }

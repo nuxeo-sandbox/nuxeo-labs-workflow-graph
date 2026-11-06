@@ -26,10 +26,12 @@ Contributors:
     Web UI's usual error message. When it cannot be drawn, the dialog closes and the promise rejects with
     error.lwgFallback = true, so the caller can open Web UI's default graph instead.
 
-  Only uses existing endpoints:
+  Data, requested in parallel (the graph is drawn once all have answered):
     GET /api/v1/workflow/{id}/graph   the graph (required)
     GET /api/v1/workflow/{id}         the title and the model name (optional: "Workflow" is displayed if it
                                       cannot be read, and the direction is then kept for this instance only)
+    LabsWorkflowGraph.GetHistory      the steps already done and the transitions already followed (optional,
+                                      server side of the plugin, @since 2025.2: without it, no history is shown)
 
   Direction: top to bottom by default. The direction chosen in the toolbar (or with the Down / Right arrow keys)
   is kept in the browser (localStorage), per workflow model, see LWG.directionStorageKey.
@@ -157,6 +159,7 @@ Contributors:
       headers='{"Content-Type": "application/json"}'
     ></nuxeo-resource>
     <nuxeo-resource id="workflowResource" path="/workflow/[[workflowId]]"></nuxeo-resource>
+    <nuxeo-operation id="historyOp" op="LabsWorkflowGraph.GetHistory"></nuxeo-operation>
 
     <nuxeo-dialog
       id="dialog"
@@ -271,13 +274,21 @@ Contributors:
               console.warn(LWG.LOG_PREFIX, 'Cannot read the workflow:', (e && (e.status || e.message)) || e);
               return null;
             });
+          // The history (steps already done, transitions already followed) is optional as well.
+          const historyLoaded = this._loadHistory(workflowId, isStale);
 
           return Promise.all([this.$.graphResource.get(), LWG.fontsReady()])
             .catch((e) => {
               throw errorWith({ lwgGraphError: true }, e);
             })
-            .then(([graph]) => workflowLoaded.then((workflow) => ({ graph, workflow })))
-            .then(({ graph, workflow }) => {
+            .then(([graph]) =>
+              Promise.all([workflowLoaded, historyLoaded]).then(([workflow, history]) => ({
+                graph,
+                workflow,
+                history,
+              })),
+            )
+            .then(({ graph, workflow, history }) => {
               if (isStale()) {
                 return;
               }
@@ -286,7 +297,7 @@ Contributors:
               }
               this._directionKey = LWG.directionStorageKey(workflow, workflowId);
               try {
-                renderer.setGraph(graph, { direction: LWG.loadDirection(this._directionKey) });
+                renderer.setGraph(graph, { direction: LWG.loadDirection(this._directionKey), history });
               } catch (e) {
                 throw errorWith({ lwgFallback: true }, e);
               }
@@ -307,6 +318,29 @@ Contributors:
 
         close() {
           this.$.dialog.close();
+        },
+
+        // History of the workflow (LabsWorkflowGraph.GetHistory), resolves to null when it cannot be read.
+        _loadHistory(workflowId, isStale) {
+          const op = this.$.historyOp;
+          op.params = { workflowId };
+          return op
+            .execute()
+            .then((result) => {
+              const history = LWG.normalizeHistory(result);
+              if (!history && !isStale()) {
+                console.warn(LWG.LOG_PREFIX, 'Invalid workflow history, ignored');
+              }
+              return history;
+            })
+            .catch((e) => {
+              // a newer opening aborts the request
+              if (!isStale()) {
+                const reason = e && ((e.response && e.response.status) || e.status || e.message);
+                console.warn(LWG.LOG_PREFIX, 'Cannot read the workflow history:', reason || e);
+              }
+              return null;
+            });
         },
 
         _ensureRenderer() {

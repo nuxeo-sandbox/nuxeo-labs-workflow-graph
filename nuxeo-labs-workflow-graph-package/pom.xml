@@ -23,6 +23,10 @@
     <!-- Additional bundles to be deployed by the MP -->
     <dependency>
       <groupId>nuxeo.labs.workflowgraph</groupId>
+      <artifactId>nuxeo-labs-workflow-graph-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>nuxeo.labs.workflowgraph</groupId>
       <artifactId>nuxeo-labs-workflow-graph-web</artifactId>
     </dependency>
   </dependencies>

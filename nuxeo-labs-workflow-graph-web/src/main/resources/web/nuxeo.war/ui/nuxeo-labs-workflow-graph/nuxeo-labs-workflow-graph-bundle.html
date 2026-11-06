@@ -21,8 +21,8 @@ Contributors:
   Entry point of the plugin, loaded by Web UI at startup (see OSGI-INF/lwg-webresources-contrib.xml).
   The scripts run in this order:
 
-    lwg-core.js        namespace, directions, translations, text measuring, model. Saves any global "dagre"
-                       defined by another add-on, so lwg-layout.js can restore it
+    lwg-core.js        namespace, directions, translations, text measuring, model (graph and history). Saves
+                       any global "dagre" defined by another add-on, so lwg-layout.js can restore it
     vendor/dagre.min.js  dagre 3.1.3 (MIT), unmodified
     lwg-layout.js      geometry helpers and the layout, top to bottom or left to right (dagre)
     lwg-icons.js       inline SVG icons

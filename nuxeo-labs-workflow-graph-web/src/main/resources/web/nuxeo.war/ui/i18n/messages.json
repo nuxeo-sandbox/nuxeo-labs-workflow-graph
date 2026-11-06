@@ -13,6 +13,7 @@
   "labsWorkflowGraph.kind.merge": "Merge",
   "labsWorkflowGraph.current": "Current",
   "labsWorkflowGraph.currentStep": "Current step",
+  "labsWorkflowGraph.passedStep": "Step already done",
   "labsWorkflowGraph.toolbar.zoomIn": "Zoom in",
   "labsWorkflowGraph.toolbar.zoomOut": "Zoom out",
   "labsWorkflowGraph.toolbar.zoomLevel": "Zoom level",

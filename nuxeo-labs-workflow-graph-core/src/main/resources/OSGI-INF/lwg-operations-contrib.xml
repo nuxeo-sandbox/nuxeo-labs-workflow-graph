@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!--
+  @since 2025.2
+-->
+<component name="nuxeo.labs.workflowgraph.operations">
+
+  <extension target="org.nuxeo.ecm.core.operation.OperationServiceComponent" point="operations">
+    <operation class="nuxeo.labs.workflowgraph.GetWorkflowHistoryOp" />
+  </extension>
+
+</component>

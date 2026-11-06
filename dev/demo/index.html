@@ -23,7 +23,8 @@ Contributors:
       python3 -m http.server 8765
   then open http://localhost:8765/dev/demo/index.html
   URL parameters: wf (serial, parallel, subWorkflow, contract, large), theme (default, dark, hyland-light,
-  hyland-dark), lang (en, fr), dir (TB, LR: forces the direction instead of the one kept for the sample).
+  hyland-dark), lang (en, fr), dir (TB, LR: forces the direction instead of the one kept for the sample),
+  history (on, off: shows the steps already done and the transitions already followed, on by default).
 -->
 <html lang="en">
   <head>
@@ -112,6 +113,13 @@ Contributors:
           <option>fr</option>
         </select>
       </label>
+      <label
+        >History
+        <select id="history">
+          <option>on</option>
+          <option>off</option>
+        </select>
+      </label>
     </header>
     <div id="graph"></div>
 
@@ -132,6 +140,7 @@ Contributors:
         const wfName = params.get('wf') || 'serial';
         const theme = params.get('theme') || 'default';
         const lang = params.get('lang') || 'en';
+        const history = params.get('history') === 'off' ? 'off' : 'on';
         document.documentElement.dataset.theme = theme;
         document.documentElement.lang = lang;
 
@@ -141,7 +150,7 @@ Contributors:
         window.nuxeo = { I18n: { language: lang, translate: (key) => messages[key] || key } };
 
         const LWG = window.NuxeoLabs.WorkflowGraph;
-        const selects = { wf: wfName, theme, lang };
+        const selects = { wf: wfName, theme, lang, history };
         const wfSelect = document.getElementById('wf');
         Object.keys(window.LWG_SAMPLES).forEach((k) => {
           const opt = document.createElement('option');
@@ -167,7 +176,10 @@ Contributors:
         });
         window.renderer = renderer;
         await LWG.fontsReady();
-        renderer.setGraph(sample.graph, { direction: params.get('dir') || LWG.loadDirection(directionKey) });
+        renderer.setGraph(sample.graph, {
+          direction: params.get('dir') || LWG.loadDirection(directionKey),
+          history: history === 'on' ? sample.history : null,
+        });
         document.body.dataset.ready = 'true';
       })().catch((e) => {
         console.error(e);

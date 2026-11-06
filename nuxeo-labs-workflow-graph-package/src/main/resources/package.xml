@@ -4,8 +4,10 @@
   <description>
     <p>Replaces the "View Graph" dialog of Nuxeo Web UI with a simple, modern and read-only workflow graph:
     automatic layout (top to bottom or left to right), themed cards, current step and its next transitions
-    highlighted, zoom (buttons, keys, pinch), fit to screen and center on the current step. Web UI resources
-    only, no server-side code.</p>
+    highlighted, steps already done and transitions already followed marked, zoom (buttons, keys, pinch), fit to
+    screen and center on the current step. Server side: records the transitions followed by graph workflows (one
+    audit entry on the workflow instance per completed step) and exposes the history of a workflow instance
+    (operation LabsWorkflowGraph.GetHistory).</p>
   </description>
   <vendor>Hyland</vendor>
   <installer restart="true" />

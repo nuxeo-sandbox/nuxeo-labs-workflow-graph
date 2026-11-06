@@ -8,6 +8,8 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
 * Drawing top to bottom or left to right
 * With themed cards
 * Current step and transitions are highlighted.
+* Steps already done and transitions already followed are marked, branches not followed are dimmed (the
+  transitions are recorded by the server part of the plugin, from its installation on).
 * Controls to read large graphs:
   * Zoom
   * Fit to screen,
@@ -41,6 +43,25 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
 - **Next transitions**: the transitions leaving the current step(s) keep their color and are drawn thicker, with
   bigger arrow heads and emphasized labels, on top of the other transitions. A single one is drawn in the
   highlight color.
+- **History** (since 2025.2): the steps already done (completed at least once) get a border and a check badge, the
+  transitions already followed are drawn in the same color (`--lwg-passed`), a bit thicker, as a trail from the
+  start to the current step(s). The current look wins: a current step that was done before (loop) is shown as
+  current, a transition leaving a current step is shown as a next transition. See [Server side](#server-side) for
+  what is recorded and its limits.
+- **Branches not followed** (since 2025.2): what was not done and cannot happen anymore is faded and grayed, so
+  the path and what can still happen stand out in a large workflow:
+  - a step is dimmed when it never started (not current, not waiting for other branches, not the target of a
+    followed transition) **and** cannot be reached anymore: no transition leads to it from a current step (or from
+    a merge waiting for other branches). The steps still to come keep their normal look;
+  - a transition is dimmed when it was never followed and cannot be followed anymore: its step is dimmed, or its
+    step will not run again and its target never started. The current step and its transitions never change.
+
+  Example, Parallel Document Review while the opinions are given: the Stop after "Cancelation" (Choose
+  Participants will not run again) is dimmed, the two Stops after "Consolidate the Review" are not. With a loop back
+  to an earlier step (e.g. "Changes requested" back to the preparation), everything after that step can happen
+  again: nothing is dimmed there. When the workflow is done, every step never reached is dimmed. The strength can be
+  changed (`--lwg-dimmed-opacity`). Like the steps already done, this works for the workflows started before the
+  installation. Without the history (server part not reachable), nothing is dimmed.
 - **Opening**: the graph is fitted to the dialog. When it would then be displayed under 50%, the view zooms to
   80% on the current step instead (press `f` key to see the whole graph). Switching the direction resets the view
   the same way.
@@ -63,11 +84,12 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
 The toolbar shows the zoom level (5% to 250%). The keys work once the graph has the focus: it has it when the
 dialog opens, and after a click on the graph.
 
-## How it works (front end only)
+## How it works
 
-- The data comes from the existing REST API: `GET /api/v1/workflow/{id}/graph` (steps, kinds, states,
-  transitions and their labels) and `GET /api/v1/workflow/{id}` (title of the dialog and name of the workflow
-  model, optional). Both are requested in parallel. No server-side code is needed.
+- The data comes from the REST API: `GET /api/v1/workflow/{id}/graph` (steps, kinds, states, transitions and their
+  labels), `GET /api/v1/workflow/{id}` (title of the dialog and name of the workflow model, optional) and the
+  `LabsWorkflowGraph.GetHistory` operation of the plugin (history, optional, see [Server side](#server-side)). The
+  three are requested in parallel, the graph is drawn once all have answered.
 - Web UI's default graph is the `nuxeo-workflow-graph` element (jsPlumb, fixed 880x720 canvas, Studio positions).
   It is used by the document workflow bar and by the task view, which both only call its `show()` method. The
   element cannot be redefined, so this plugin **patches `show()`** once the element is defined: the plugin's
@@ -82,6 +104,7 @@ dialog opens, and after a click on the graph.
 | --- | --- |
 | `GET /api/v1/workflow/{id}/graph` | the dialog closes and Web UI's usual error message is shown |
 | `GET /api/v1/workflow/{id}` | the title is "Workflow", and the direction is kept for this workflow instance only |
+| `LabsWorkflowGraph.GetHistory` | the graph is drawn without the history (a warning is logged in the browser console) |
 | Layout or drawing error | the dialog closes and Web UI's default graph is opened |
 
 > [!WARNING]
@@ -92,6 +115,69 @@ dialog opens, and after a click on the graph.
 >
 > Notice this is very unlikely, but it is the only way to patch the original dialog without forking Web UI (and we
 > don't want to fork Web UI)
+
+## Server side
+
+Nuxeo does not keep the path followed by a graph workflow: the graph endpoint only tells which steps are current (a
+step that is done goes back to the `ready` state, like a step never reached), and the result of a transition is
+reset as soon as its target step starts. So the plugin (since 2025.2) adds a small Java bundle,
+`nuxeo-labs-workflow-graph-core`.
+
+**Steps already done.** Read from the step documents (`RouteNode`) of the workflow instance: a step is done when
+its `rnode:endDate` is set (it completed at least once). This works for every workflow, including the ones started
+before the plugin was installed.
+
+**Transitions already followed: recorded from the installation on.** A synchronous listener
+(`beforeDocumentModification`) detects that a step completes (the workflow engine saves it with a new
+`rnode:endDate`, right after evaluating its transitions) and records the transitions it follows: one audit entry
+per completed step, on the workflow instance:
+
+| Field | Value |
+| --- | --- |
+| `eventId` | `lwgWorkflowStepCompleted` |
+| `category` | `Routing` |
+| `docUUID` | id of the workflow instance |
+| `comment` | readable summary, e.g. `Task6d8 -> Task5c1 (sdr_finishTask6d8)` |
+| `extended.nodeId` | id of the completed step |
+| `extended.transitions` | positions of the followed transitions in the step (definition order), comma separated, empty for an end step |
+
+The listener never breaks a workflow (an error is logged as a warning). Nothing else is stored: no actor, comment
+or variable.
+
+**Operation `LabsWorkflowGraph.GetHistory`** (category "Workflow Context"), used by the dialog:
+
+| Input | Parameter | Output |
+| --- | --- | --- |
+| void | `workflowId` (required): id of the workflow instance | JSON blob |
+
+```json
+{
+  "workflowId": "a1b2c3d4-...",
+  "nodes": [{ "id": "Task6d8", "completed": true, "starts": 2 }],
+  "transitions": [{ "source": "Task6d8", "index": 1, "name": "sdr_rejectionTask6d8", "target": "Task6d8", "count": 1 }]
+}
+```
+
+- `nodes`: the steps that started at least once; `completed`: they completed at least once; `starts`: number of
+  starts (`rnode:count`, including the current run).
+- `transitions`: the transitions followed at least once; `index` is the position of the transition in its step,
+  the order of the graph endpoint; `count`: number of times it was followed.
+- Allowed to administrators and to the users who can read the workflow instance or one of its attached documents
+  (in Web UI, the readers of a document can open the graph of its workflows). The data is then read with a system
+  session: the step documents and the audit of a workflow instance are not readable by every participant. Errors:
+  404 when the id is not the one of a workflow instance, 403 when the user is not allowed.
+
+**Limits.**
+
+- The transitions followed before the plugin was installed are not known: an old workflow shows its steps done,
+  without the trail between them.
+- The workflow engine evaluates the transitions with the variables of the moment: the recorded transitions are
+  the ones it actually followed, a button alone would not tell (several transitions can share a button).
+- With loops, a step done several times is marked once (`starts` and `count` give the numbers, the graph does not
+  show them).
+- The audit entries are written when the transaction commits: a transition shows up once the task is completed.
+- The plugin deletes nothing: Nuxeo removes the done and canceled workflow instances with its daily cleanup, their
+  audit entries stay, as any audit entry.
 
 ## Colors
 
@@ -107,6 +193,8 @@ are inherited through shadow DOM boundaries: set them on `html`, the graph reads
 | Variable | Default | Used for |
 | --- | --- | --- |
 | `--lwg-current` | `--nuxeo-focus-ring-color`, else `--nuxeo-primary-color` | current steps (border, ring, badge), and the transition leaving a current step when it is its only one |
+| `--lwg-passed` | `#0d9488` (teal) | steps already done (border, check badge) and transitions already followed (line, arrow, label), whatever their transition color |
+| `--lwg-dimmed-opacity` | `0.4` | not a color: opacity of the branches not followed (steps; their transitions use 80% of it, their labels are faded as much) |
 | `--lwg-transition-1` to `--lwg-transition-5` | `#16a34a` (green), `#ea580c` (orange), `#9333ea` (purple), `#db2777` (pink), `#0891b2` (cyan) | transitions of a step that has several of them, see below |
 | `--lwg-edge` | mix of `--lwg-text` and `--lwg-bg` | transitions of a step that has a single one |
 | `--lwg-color-start`, `--lwg-color-end` | `#1f9d63`, `#e5484d` | Start and End pills |
@@ -126,7 +214,7 @@ it stays readable whatever the color.
 **Derived colors.** Some colors have no variable of their own and are computed (`color-mix()`) from the ones
 above: borders of the steps and of the labels, muted text (labels, captions), toolbar hover, and the light tints of
 the ring, the badge, the labels and the Start/End pills. Change the base colors to change them. The icon of the
-Start/End pills is always white.
+Start/End pills and the check of the steps already done are always white.
 
 **Example.** Variables can be set:
 
@@ -141,6 +229,10 @@ Start/End pills is always white.
     html {
       /* current step */
       --lwg-current: #c2410c;
+      /* steps already done, transitions already followed */
+      --lwg-passed: #4d7c0f;
+      /* branches not followed: less faded */
+      --lwg-dimmed-opacity: 0.55;
       /* transitions of a step that has several of them */
       --lwg-transition-1: #15803d;
       --lwg-transition-2: #b91c1c;
@@ -166,6 +258,20 @@ Variables starting with `--_lwg-` are internal: they are redefined by the graph,
 ## Architecture
 
 ```
+nuxeo-labs-workflow-graph-core/src/main/
+├── java/nuxeo/labs/workflowgraph/
+│   ├── StepCompletedListener.java     records the transitions followed (one audit entry per completed step)
+│   ├── WorkflowHistoryReader.java     access check, steps (RouteNode documents) and transitions (audit)
+│   ├── GetWorkflowHistoryOp.java      operation LabsWorkflowGraph.GetHistory (JSON)
+│   ├── WorkflowHistory.java           the JSON returned (records)
+│   └── WorkflowHistoryConstants.java  event name, audit extended info keys
+└── resources/
+    ├── META-INF/MANIFEST.MF
+    └── OSGI-INF/
+        ├── lwg-audit-contrib.xml       audited event and its extended info
+        ├── lwg-listener-contrib.xml    the recorder
+        └── lwg-operations-contrib.xml  the operation
+
 nuxeo-labs-workflow-graph-web/src/main/resources/
 ├── META-INF/MANIFEST.MF
 ├── OSGI-INF/
@@ -175,7 +281,7 @@ nuxeo-labs-workflow-graph-web/src/main/resources/
     ├── i18n/messages.json, messages-fr.json
     └── nuxeo-labs-workflow-graph/
         ├── nuxeo-labs-workflow-graph-bundle.html   entry point (script order)
-        ├── lwg-core.js                namespace, directions (storage), translations, text measuring, model
+        ├── lwg-core.js                namespace, directions (storage), translations, text measuring, model, history
         ├── lwg-layout.js              geometry helpers and the layout, top to bottom or left to right (dagre)
         ├── lwg-icons.js               inline SVG icons (Material Icons)
         ├── lwg-styles.js              CSS of the graph (no animation)
@@ -186,7 +292,7 @@ nuxeo-labs-workflow-graph-web/src/main/resources/
 ```
 
 Plain JavaScript and HTML imports, like Web UI add-ons built without a JS toolchain: no npm build is needed and
-the Maven build only packages the files.
+the Maven build only packages the files. The Java bundle has no dependency other than Nuxeo.
 
 ## Development
 
@@ -195,9 +301,10 @@ The `dev/` folder is not packaged. Nothing is installed by the project: the brow
 
 | Command | What it does |
 | --- | --- |
-| `node --test dev/test` | Unit tests of the directions and their storage, translations, model (including the transition colors), geometry and layout (every sample in both directions: steps placed without overlap, transitions attached to their steps, labels off the steps). Node 20+, no dependency |
-| `python3 -m http.server 8765` then `http://localhost:8765/dev/demo/index.html` | Demo of the renderer with the sample workflows, themes and languages (URL parameters: `wf`, `theme`, `lang`, `dir` to force `TB` or `LR`; otherwise the direction is kept per sample, as in the dialog) |
-| `node dev/tools/screenshots.mjs [filter]` | Renders every sample in every theme (and left to right) in headless Chrome and writes `dev/out/demo/*.png`, then checks the interactions: initial view (zoom on the current step for a large graph), `F`, `C` (cycling), `+`, `-`, minimum zoom, toolbar, Ctrl + wheel, wheel, drag, no animation, steps not focusable, transition colors, color overrides, direction switch (toolbar and `↓` / `→` keys, view reset, kept per workflow, not stored for TB). Fails on any console error or warning. Filter `checks`: interaction checks only |
+| `node --test dev/test` | Unit tests of the directions and their storage, translations, model (including the transition colors and the history), geometry and layout (every sample in both directions: steps placed without overlap, transitions attached to their steps, labels off the steps). Node 20+, no dependency |
+| `python3 -m http.server 8765` then `http://localhost:8765/dev/demo/index.html` | Demo of the renderer with the sample workflows, themes and languages (URL parameters: `wf`, `theme`, `lang`, `dir` to force `TB` or `LR`, otherwise the direction is kept per sample as in the dialog; `history=off` hides the history) |
+| `node dev/tools/screenshots.mjs [filter]` | Renders every sample in every theme (and left to right) in headless Chrome and writes `dev/out/demo/*.png`, then checks the interactions: initial view (zoom on the current step for a large graph), `F`, `C` (cycling), `+`, `-`, minimum zoom, toolbar, Ctrl + wheel, wheel, drag, no animation, steps not focusable, transition colors, color overrides, history (steps done, transitions followed, branches not followed, steps still to come not dimmed, sizes, drawing order, `--lwg-passed`, `--lwg-dimmed-opacity`), direction switch (toolbar and `↓` / `→` keys, view reset, kept per workflow, not stored for TB). Fails on any console error or warning. Filter `checks`: interaction checks only |
+| `mvn clean install` | Builds the bundles and the package, and runs the Java tests (JUnit 4, in-memory audit): recorder and history on a simple path, a loop, a fork and merge, "execute only the first transition", access rules, invalid ids, a workflow done before the installation |
 
 Environment variables of the browser tool:
 
@@ -208,7 +315,8 @@ Environment variables of the browser tool:
 
 The samples (`dev/demo/samples.js`) are SerialDocumentReview, ParallelDocumentReview and MainWF rebuilt from the
 Nuxeo sources, plus two synthetic workflows: "contract" (fork, merge, loops, sub-workflow, long titles) and
-"large" (59 steps, two current steps in parallel branches).
+"large" (59 steps, two current steps in parallel branches). Each one has a history, in the format of the
+`LabsWorkflowGraph.GetHistory` operation.
 
 ## Build
 

@@ -22,9 +22,10 @@
  * derive from the Web UI theme variables (--nuxeo-*), so the default, dark and Hyland themes are supported.
  * No animation, no transition.
  *
- * Public variables (--lwg-current, --lwg-color-*, --lwg-transition-1 to 5, --lwg-bg, --lwg-card-bg, --lwg-text,
- * --lwg-edge, --lwg-grid) can be set on html or any ancestor, e.g. from a theme or a Studio style. They are only
- * read here, through the internal --_lwg-* variables, so a value set outside is never shadowed by a default.
+ * Public variables (--lwg-current, --lwg-passed, --lwg-dimmed-opacity, --lwg-color-*, --lwg-transition-1 to 5,
+ * --lwg-bg, --lwg-card-bg, --lwg-text, --lwg-edge, --lwg-grid) can be set on html or any ancestor, e.g. from a theme
+ * or a Studio style. They are only read here, through the internal --_lwg-* variables, so a value set outside is
+ * never shadowed by a default.
  *
  * Sizes must stay in sync with LWG.METRICS (lwg-core.js), used to compute the layout.
  *
@@ -50,6 +51,8 @@
   --_lwg-label-border: color-mix(in srgb, var(--_lwg-text) 18%, var(--_lwg-card-bg));
   --_lwg-grid: var(--lwg-grid, color-mix(in srgb, var(--_lwg-text) 16%, var(--_lwg-bg)));
   --_lwg-current: var(--lwg-current, var(--nuxeo-focus-ring-color, var(--nuxeo-primary-color, #0066ff)));
+  --_lwg-passed: var(--lwg-passed, #0d9488);
+  --_lwg-dimmed: var(--lwg-dimmed-opacity, 0.4);
   --_lwg-color-start: var(--lwg-color-start, #1f9d63);
   --_lwg-color-end: var(--lwg-color-end, #e5484d);
   --_lwg-color-step: var(--lwg-color-step, #3b7ff5);
@@ -131,7 +134,9 @@
 
 /* --_lwg-tc is the color of a transition (line, arrow, label): neutral by default, the highlight color when it
    leaves a current step, a color of the palette (lwg-tc-1 to 5, set with lwg-tc) when its step has several
-   transitions. Leaving a current step, a transition of the palette keeps its color and is drawn thicker. */
+   transitions. Leaving a current step, a transition of the palette keeps its color and is drawn thicker.
+   Already followed (is-taken, never with is-next), a transition has the color of the steps already done, whatever
+   its palette color: the rule comes after the palette ones. */
 .lwg-edge, .lwg-label { --_lwg-tc: var(--_lwg-edge); }
 .lwg-edge.is-next, .lwg-label.is-next { --_lwg-tc: var(--_lwg-current); }
 .lwg-edge.lwg-tc-1, .lwg-label.lwg-tc-1 { --_lwg-tc: var(--_lwg-transition-1); }
@@ -139,6 +144,7 @@
 .lwg-edge.lwg-tc-3, .lwg-label.lwg-tc-3 { --_lwg-tc: var(--_lwg-transition-3); }
 .lwg-edge.lwg-tc-4, .lwg-label.lwg-tc-4 { --_lwg-tc: var(--_lwg-transition-4); }
 .lwg-edge.lwg-tc-5, .lwg-label.lwg-tc-5 { --_lwg-tc: var(--_lwg-transition-5); }
+.lwg-edge.is-taken, .lwg-label.is-taken { --_lwg-tc: var(--_lwg-passed); }
 
 .lwg-edge-line {
   fill: none;
@@ -158,6 +164,10 @@
 
 .lwg-edge.is-next.lwg-tc .lwg-edge-line {
   stroke-width: 3.5;
+}
+
+.lwg-edge.is-taken .lwg-edge-line {
+  stroke-width: 2.4;
 }
 
 .lwg-label {
@@ -196,6 +206,25 @@
   border-color: var(--_lwg-tc);
   background: color-mix(in srgb, var(--_lwg-tc) 14%, var(--_lwg-card-bg));
   color: var(--_lwg-text);
+}
+
+.lwg-label.is-taken {
+  border-color: color-mix(in srgb, var(--_lwg-tc) 75%, var(--_lwg-card-bg));
+  background: color-mix(in srgb, var(--_lwg-tc) 10%, var(--_lwg-card-bg));
+  color: var(--_lwg-text);
+}
+
+/* Never followed and cannot be followed anymore (branch not followed): faded. The labels stay opaque (their
+   transition passes below them), they are faded with their colors. */
+.lwg-edge.is-dimmed {
+  opacity: calc(var(--_lwg-dimmed) * 0.8);
+}
+
+.lwg-label.is-dimmed {
+  border-color: color-mix(in srgb, var(--_lwg-tc) calc(var(--_lwg-dimmed) * 60%), var(--_lwg-card-bg));
+  background: var(--_lwg-card-bg);
+  color: color-mix(in srgb, var(--_lwg-text-muted) calc(var(--_lwg-dimmed) * 100%), var(--_lwg-card-bg));
+  box-shadow: none;
 }
 
 /* ==================== Steps ==================== */
@@ -315,6 +344,46 @@
 
 .lwg-node.lwg-terminal.is-current {
   padding: 0 15px;
+}
+
+/* Steps already done (never with is-current): border in the color of the trail and a check badge in the corner.
+   The border is 1px thicker, the padding 1px thinner: the size does not change (LWG.METRICS). */
+.lwg-node.is-passed {
+  border: 2px solid color-mix(in srgb, var(--_lwg-passed) 80%, var(--_lwg-card-bg));
+  padding: 11px 13px;
+}
+
+.lwg-node.lwg-terminal.is-passed {
+  padding: 0 15px;
+}
+
+.lwg-node-check {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--_lwg-passed);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px var(--_lwg-card-bg);
+}
+
+.lwg-node-check svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* Steps never reached and that cannot be reached anymore (branch not followed): faded and grayed, so the path
+   followed and the steps still to come stand out. */
+.lwg-node.is-dimmed {
+  opacity: var(--_lwg-dimmed);
+  filter: grayscale(0.7);
+  box-shadow: none;
 }
 
 .lwg-node-badge {
