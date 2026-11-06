@@ -371,6 +371,17 @@
     return LWG.t(`labsWorkflowGraph.kind.${kind}`);
   };
 
+  /*
+   * True when a node id is also the name of an Object.prototype member ("__proto__", "constructor",
+   * "toString", "hasOwnProperty", ...). The layouts and dagre key plain objects by node id, so such an id
+   * would break the layout and, for "__proto__", alter Object.prototype of the whole Web UI page. Studio
+   * never generates these ids; only a hand-written workflow model can contain one.
+   * So this error is quite extremely unlikely, but easy to avoid.
+   */
+  LWG.isReservedNodeId = function (id) {
+    return String(id) in Object.prototype;
+  };
+
   function toNumber(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -444,6 +455,9 @@
    * colorIndex tells the transitions leaving the same step apart, as Web UI's default graph does: 0 when the
    * step has a single transition (neutral color), otherwise 1 to TRANSITION_COLOR_COUNT from the rank of the
    * transition in the step (the order of the definition), reused in turn (1, 2, 3, 4, 5, 1, 2...).
+   *
+   * Throws when a node id is a reserved name (see LWG.isReservedNodeId): the renderer then fails and the
+   * viewer falls back to Web UI's default graph.
    */
   LWG.buildModel = function (graph, options) {
     const opts = options || {};
@@ -461,6 +475,9 @@
         return;
       }
       const id = String(raw.id);
+      if (LWG.isReservedNodeId(id)) {
+        throw new Error(`Node id "${id}" is a reserved name, the custom graph cannot draw this workflow`);
+      }
       if (byId.has(id)) {
         warnings.push(`Duplicate node id ${id}, ignored`);
         return;
