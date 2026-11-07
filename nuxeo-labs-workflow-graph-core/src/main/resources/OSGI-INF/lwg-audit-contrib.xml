@@ -3,6 +3,7 @@
   Audit of the transitions followed by graph workflows: the recorder (lwg-listener-contrib.xml) fires
   lwgWorkflowStepCompleted on the workflow instance each time a step completes. Workflow instances are audited even if
   they are system documents (ForceAudit facet added by the routing audit contribution).
+  The "routes" extension point exists since LTS 2025.16 (minimum version of the package).
 
   @since 2025.2
 -->
@@ -17,11 +18,14 @@
     </route>
   </extension>
 
+  <!-- Keys prefixed with "lwg": the OpenSearch audit backend has one mapping for the extended info of every event -->
   <extension target="org.nuxeo.audit.service.AuditComponent" point="extendedInfo">
     <!-- id of the completed step (rnode:nodeId) -->
-    <extendedInfo event="lwgWorkflowStepCompleted" key="nodeId" expression="${message.properties.nodeId}" />
-    <!-- positions of the followed transitions in the step (definition order), comma separated, empty for an end step -->
-    <extendedInfo event="lwgWorkflowStepCompleted" key="transitions" expression="${message.properties.transitions}" />
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgNodeId" expression="${message.properties.lwgNodeId}" />
+    <!-- positions of the followed transitions in the step (definition order), comma separated, empty for an
+         end step -->
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgTransitions"
+      expression="${message.properties.lwgTransitions}" />
   </extension>
 
 </component>

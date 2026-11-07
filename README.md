@@ -25,6 +25,13 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
 | ![Left to right](README-Images/dialog-serial-LR.png) | ![Left to right, Hyland dark theme](README-Images/contract-hyland-dark-LR.png) |
 | ![Hyland dark theme](README-Images/contract-hyland-dark.png) | ![Dark theme, French](README-Images/serial-dark-fr.png) |
 
+## Requirements
+
+- Nuxeo LTS 2025, **hotfix 2025.16 or later**: the recorder of the transitions followed (see
+  [Server side](#server-side)) uses the audit routes added by this hotfix. The package targets this hotfix and the
+  later ones.
+- Nuxeo Web UI (package `nuxeo-web-ui`).
+
 ## Features
 
 - **Automatic layout** ([dagre](https://github.com/dagrejs/dagre)), top to bottom by default or left to right.
@@ -137,12 +144,16 @@ per completed step, on the workflow instance:
 | `eventId` | `lwgWorkflowStepCompleted` |
 | `category` | `Routing` |
 | `docUUID` | id of the workflow instance |
-| `comment` | readable summary, e.g. `Task6d8 -> Task5c1 (sdr_finishTask6d8)` |
-| `extended.nodeId` | id of the completed step |
-| `extended.transitions` | positions of the followed transitions in the step (definition order), comma separated, empty for an end step |
+| `comment` | readable summary, e.g. `Task6d8 -> Task5c1 (sdr_finishTask6d8)`, abbreviated to 1000 characters |
+| `extended.lwgNodeId` | id of the completed step |
+| `extended.lwgTransitions` | positions of the followed transitions in the step (definition order), comma separated, empty for an end step |
 
-The listener never breaks a workflow (an error is logged as a warning). Nothing else is stored: no actor, comment
-or variable.
+The extended info keys start with `lwg`: in the OpenSearch audit backend, the extended info of every event share one
+mapping, a generic name could clash with the one of another add-on.
+
+The listener never breaks a workflow (an error is logged as a warning). Besides the fields above, the audit fills
+the ones of every entry (date, user who completed the step, path, type and state of the workflow instance). Nothing
+else is stored: no task comment, no workflow or step variable.
 
 **Operation `LabsWorkflowGraph.GetHistory`** (category "Workflow Context"), used by the dialog:
 
@@ -165,7 +176,9 @@ or variable.
 - Allowed to administrators and to the users who can read the workflow instance or one of its attached documents
   (in Web UI, the readers of a document can open the graph of its workflows). The data is then read with a system
   session: the step documents and the audit of a workflow instance are not readable by every participant. Errors:
-  404 when the id is not the one of a workflow instance, 403 when the user is not allowed.
+  404 when the id is not the one of a workflow instance (a workflow model is not an instance), 403 when the user is
+  not allowed. When the audit cannot be read, the steps are still returned, without the transitions (a warning is
+  logged on the server).
 
 **Limits.**
 
@@ -200,9 +213,10 @@ last deployed wins. Use a Studio XML extension (the `<extension>` element is eno
   transitions already recorded; the transitions followed afterwards are unknown, as before the installation.
 - Use your own recorder: same `<listener name="lwgStepCompletedListener" class="com.example.MyRecorder" />` (the
   events are kept). It must stay synchronous (an `EventListener`: the results of the transitions are reset as soon
-  as the next step starts) and, for the graph to draw the transitions, audit `lwgWorkflowStepCompleted` on the
-  workflow instance with the `nodeId` and `transitions` extended info (see the table above). It can extend
-  `StepCompletedListener` (`handleEvent`, `record`).
+  as the next step starts) and, for the graph to draw the transitions, fire `lwgWorkflowStepCompleted` on the
+  workflow instance with the `lwgNodeId` and `lwgTransitions` event properties (the audit contribution of the plugin
+  stores them as the extended info of the table above). It can extend `StepCompletedListener` (`handleEvent`,
+  `record`).
 - Hide the whole history (no check badge, no trail, no dimming), with or without the recorder: disable the REST
   binding of the operation. The call then returns 404 and the graph is drawn without the history (a warning is
   logged in the browser console).
@@ -228,7 +242,7 @@ are inherited through shadow DOM boundaries: set them on `html`, the graph reads
 | --- | --- | --- |
 | `--lwg-current` | `--nuxeo-focus-ring-color`, else `--nuxeo-primary-color` | current steps (border, ring, badge), and the transition leaving a current step when it is its only one |
 | `--lwg-passed` | `#0d9488` (teal) | steps already done (border, check badge) and transitions already followed (line, arrow, label), whatever their transition color |
-| `--lwg-dimmed-opacity` | `0.4` | not a color: opacity of the branches not followed (steps; their transitions use 80% of it, their labels are faded as much) |
+| `--lwg-dimmed-opacity` | `0.4` | not a color: opacity of the branches not followed, a number between 0 and 1 (not a percentage); steps use it, their transitions 80% of it, their labels are faded as much |
 | `--lwg-transition-1` to `--lwg-transition-5` | `#16a34a` (green), `#ea580c` (orange), `#9333ea` (purple), `#db2777` (pink), `#0891b2` (cyan) | transitions of a step that has several of them, see below |
 | `--lwg-edge` | mix of `--lwg-text` and `--lwg-bg` | transitions of a step that has a single one |
 | `--lwg-color-start`, `--lwg-color-end` | `#1f9d63`, `#e5484d` | Start and End pills |
@@ -338,7 +352,7 @@ The `dev/` folder is not packaged. Nothing is installed by the project: the brow
 | `node --test dev/test` | Unit tests of the directions and their storage, translations, model (including the transition colors and the history), geometry and layout (every sample in both directions: steps placed without overlap, transitions attached to their steps, labels off the steps). Node 20+, no dependency |
 | `python3 -m http.server 8765` then `http://localhost:8765/dev/demo/index.html` | Demo of the renderer with the sample workflows, themes and languages (URL parameters: `wf`, `theme`, `lang`, `dir` to force `TB` or `LR`, otherwise the direction is kept per sample as in the dialog; `history=off` hides the history) |
 | `node dev/tools/screenshots.mjs [filter]` | Renders every sample in every theme (and left to right) in headless Chrome and writes `dev/out/demo/*.png`, then checks the interactions: initial view (zoom on the current step for a large graph), `F`, `C` (cycling), `+`, `-`, minimum zoom, toolbar, Ctrl + wheel, wheel, drag, no animation, steps not focusable, transition colors, color overrides, history (steps done, transitions followed, branches not followed, steps still to come not dimmed, sizes, drawing order, `--lwg-passed`, `--lwg-dimmed-opacity`), direction switch (toolbar and `↓` / `→` keys, view reset, kept per workflow, not stored for TB). Fails on any console error or warning. Filter `checks`: interaction checks only |
-| `mvn clean install` | Builds the bundles and the package, and runs the Java tests (JUnit 4, in-memory audit): recorder and history on a simple path, a loop, a fork and merge, "execute only the first transition", access rules, invalid ids, a workflow done before the installation |
+| `mvn clean install` | Builds the bundles and the package, and runs the Java tests (JUnit 4, in-memory audit): recorder and history on a simple path, a loop, a fork and merge, a merge waiting for another branch, "execute only the first transition", a step with several tasks, a canceled workflow, the length of the audit comment, access rules, invalid ids (workflow models and steps included), a workflow done before the installation. Add `-Dnuxeo.test.audit=sql` to run them with the SQL audit backend (H2) |
 
 Environment variables of the browser tool:
 
@@ -363,10 +377,10 @@ cd /path/to/nuxeo-labs-workflow-graph
 mvn clean install
 ```
 
-The marketplace package is produced at `nuxeo-labs-workflow-graph-package/target/nuxeo-labs-workflow-graph-package-<VERSION>>.zip`. To install it:
+The marketplace package is produced at `nuxeo-labs-workflow-graph-package/target/nuxeo-labs-workflow-graph-package-<VERSION>.zip`. To install it:
 
 ```bash
-nuxeoctl mp-install /path/to/nuxeo-labs-workflow-graph-package-<VERSIONn>.zip
+nuxeoctl mp-install /path/to/nuxeo-labs-workflow-graph-package-<VERSION>.zip
 ```
 
 ### Nuxeo marketplace

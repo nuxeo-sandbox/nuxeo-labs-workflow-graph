@@ -24,8 +24,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -48,7 +50,10 @@ import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.impl.UserPrincipal;
 import org.nuxeo.ecm.core.test.annotations.Granularity;
 import org.nuxeo.ecm.core.test.annotations.RepositoryConfig;
+import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
 import org.nuxeo.ecm.platform.routing.core.impl.GraphNode;
+import org.nuxeo.ecm.platform.routing.core.impl.GraphNode.State;
+import org.nuxeo.ecm.platform.routing.core.impl.GraphRoute;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 
@@ -88,6 +93,9 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         assertTrue(StringUtils.isEmpty(byNode.get("end").getExtendedValue(TRANSITIONS_KEY)));
         assertEquals("start -> step (toStep)", byNode.get("start").getComment());
         assertEquals("Routing", byNode.get("start").getCategory());
+        // the names documented for custom recorders
+        assertEquals("step", byNode.get("step").getExtendedValue("lwgNodeId"));
+        assertEquals("0", byNode.get("step").getExtendedValue("lwgTransitions"));
     }
 
     @Test
@@ -159,6 +167,106 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         WorkflowHistory history = history(id);
         assertEquals(List.of("b:true:1", "end:true:1", "start:true:1"), steps(history));
         assertEquals(List.of("b#0>end(bToEnd)=1", "start#1>b(first)=1"), transitions(history));
+    }
+
+    @Test
+    public void testCanceledWorkflow() {
+        node("start", n -> {
+            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            setTransitions(n, transition("toReview", "review", "true"));
+        });
+        node("review", n -> {
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, Boolean.TRUE);
+            setTransitions(n, transition("validate", "end", button("validate")));
+        });
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        String id = startWorkflow();
+
+        session.getDocument(new IdRef(id)).getAdapter(DocumentRoute.class).cancel(session);
+        session.save();
+
+        // the canceled step (it was waiting for its task) is not recorded as completed
+        assertEquals(List.of("start"), recordedSteps(id));
+        WorkflowHistory history = history(id);
+        assertEquals(List.of("review:false:1", "start:true:1"), steps(history));
+        assertEquals(List.of("start#0>review(toReview)=1"), transitions(history));
+    }
+
+    @Test
+    public void testStepWithSeveralTasks() {
+        node("start", n -> {
+            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            setTransitions(n, transition("toReview", "review", "true"));
+        });
+        node("review", n -> {
+            n.setPropertyValue(GraphNode.PROP_HAS_MULTIPLE_TASKS, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_TASK_ASSIGNEES, new String[] { "john", "jane" });
+            setTransitions(n, transition("validate", "end", "true"));
+        });
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        String id = startWorkflow();
+        assertEquals(2, openTasks(id, "review").size());
+
+        // the step completes with its last task only
+        routing.endTask(session, openTasks(id, "review").get(0), new HashMap<>(), "validate");
+        session.save();
+        assertEquals(List.of("start"), recordedSteps(id));
+
+        routing.endTask(session, openTasks(id, "review").get(0), new HashMap<>(), "validate");
+        session.save();
+        assertEquals(List.of("end", "review", "start"), recordedSteps(id));
+        assertEquals(List.of("review#0>end(validate)=1", "start#0>review(toReview)=1"), transitions(history(id)));
+    }
+
+    @Test
+    public void testMergeWaitingForAnotherBranch() {
+        node("start", n -> {
+            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            setTransitions(n, transition("toA", "a", "true"), transition("toB", "b", "true"));
+        });
+        node("a", n -> setTransitions(n, transition("aToMerge", "merge", "true")));
+        node("b", n -> {
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, Boolean.TRUE);
+            setTransitions(n, transition("bToMerge", "merge", button("done")));
+        });
+        node("merge", n -> {
+            n.setPropertyValue(GraphNode.PROP_MERGE, "all");
+            setTransitions(n, transition("toEnd", "end", "true"));
+        });
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        String id = startWorkflow();
+
+        // "a" is done, "b" waits for its task: the merge waits for "b", it never started
+        GraphRoute graph = session.getDocument(new IdRef(id)).getAdapter(GraphRoute.class);
+        assertEquals(State.WAITING, graph.getNode("merge").getState());
+        assertEquals(List.of("a", "start"), recordedSteps(id));
+        WorkflowHistory history = history(id);
+        assertEquals(List.of("a:true:1", "b:false:1", "start:true:1"), steps(history));
+        assertEquals(List.of("a#0>merge(aToMerge)=1", "start#0>a(toA)=1", "start#1>b(toB)=1"), transitions(history));
+
+        // once "b" is done, the merge completes once
+        resume(id, "b", "done");
+        assertEquals(List.of("a", "b", "end", "merge", "start"), recordedSteps(id));
+        history = history(id);
+        assertEquals(List.of("a:true:1", "b:true:1", "end:true:1", "merge:true:1", "start:true:1"), steps(history));
+        assertEquals(List.of("a#0>merge(aToMerge)=1", "b#0>merge(bToMerge)=1", "merge#0>end(toEnd)=1",
+                "start#0>a(toA)=1", "start#1>b(toB)=1"), transitions(history));
+    }
+
+    @Test
+    public void testCommentIsAbbreviated() {
+        List<Map<String, Serializable>> transitions = new ArrayList<>();
+        List<Integer> followed = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            transitions.add(transition("a_transition_with_a_rather_long_name_" + i, "TargetStep" + i, "true"));
+            followed.add(i);
+        }
+        assertEquals("fork -> TargetStep1 (a_transition_with_a_rather_long_name_1)",
+                StepCompletedListener.comment("fork", transitions, List.of(1)));
+        String comment = StepCompletedListener.comment("fork", transitions, followed);
+        assertEquals(StepCompletedListener.MAX_COMMENT_LENGTH, comment.length());
+        assertTrue(comment.startsWith("fork -> TargetStep0 (a_transition_with_a_rather_long_name_0), "));
+        assertTrue(comment.endsWith("..."));
     }
 
     @Test
@@ -236,6 +344,19 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, file.getId()));
         NuxeoException e = assertThrows(NuxeoException.class, () -> WorkflowHistoryReader.read(session, " "));
         assertEquals(400, e.getStatusCode());
+
+        // workflow models (draft, then validated) and steps are not workflow instances
+        createSimpleModel();
+        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, model.getId()));
+        String id = startWorkflow();
+        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, model.getId()));
+        String stepId = session.getDocument(new IdRef(id))
+                               .getAdapter(GraphRoute.class)
+                               .getNode("step")
+                               .getDocument()
+                               .getId();
+        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, stepId));
+        assertEquals(3, WorkflowHistoryReader.read(session, id).nodes().size());
     }
 
     private static List<JsonNode> sortedBySource(JsonNode array) {

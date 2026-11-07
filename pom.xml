@@ -16,7 +16,8 @@
 
   <properties>
     <nuxeo.skip.enforcer>true</nuxeo.skip.enforcer>
-    <nuxeo.target.version>2025.*</nuxeo.target.version>
+    <!-- minimum LTS 2025 hotfix: the audit "routes" extension point (lwg-audit-contrib.xml) exists since 2025.16 -->
+    <nuxeo.target.version>2025.16</nuxeo.target.version>
   </properties>
 
   <modules>

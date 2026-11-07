@@ -43,8 +43,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.nuxeo.ecm.core.api.ConcurrentUpdateException;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
@@ -64,13 +66,20 @@ import org.nuxeo.runtime.api.Framework;
  * {@link WorkflowHistoryConstants#STEP_COMPLETED_EVENT} on the workflow instance. The event is audited (see
  * {@code OSGI-INF/lwg-audit-contrib.xml}), with the id of the step and the positions of the followed transitions.
  * <p>
- * The history is a nice-to-have: any error is logged and never breaks the workflow.
+ * The history is a nice-to-have: any error is logged and never breaks the workflow. Only a
+ * {@link ConcurrentUpdateException} is rethrown, as the event service does: the transaction fails anyway.
  *
  * @since 2025.2
  */
 public class StepCompletedListener implements EventListener {
 
     private static final Logger log = LogManager.getLogger(StepCompletedListener.class);
+
+    /**
+     * Maximum length of the comment of the audit entry: the SQL audit backend stores it in a column of 1024
+     * characters, and an entry that cannot be written stops the writing of the audit.
+     */
+    public static final int MAX_COMMENT_LENGTH = 1000;
 
     @Override
     public void handleEvent(Event event) {
@@ -86,6 +95,9 @@ public class StepCompletedListener implements EventListener {
             if (isCompletion(node, docCtx)) {
                 record(docCtx, node);
             }
+        } catch (ConcurrentUpdateException e) {
+            // never swallowed, as in the event service: the transaction fails and must be retried
+            throw e;
         } catch (RuntimeException e) {
             log.warn("Cannot record the transitions followed by the workflow step of the document {}", node.getId(),
                     e);
@@ -146,7 +158,8 @@ public class StepCompletedListener implements EventListener {
      * executes only its first true transition (the ones after it are not evaluated and keep an old result), none for
      * an end step (the workflow ends there, its transitions are ignored).
      */
-    protected static List<Integer> followedTransitions(DocumentModel node, List<Map<String, Serializable>> transitions) {
+    protected static List<Integer> followedTransitions(DocumentModel node,
+            List<Map<String, Serializable>> transitions) {
         List<Integer> followed = new ArrayList<>();
         if (Boolean.TRUE.equals(node.getPropertyValue(PROP_STOP))) {
             return followed;
@@ -163,14 +176,19 @@ public class StepCompletedListener implements EventListener {
         return followed;
     }
 
-    // Human readable summary, stored as the comment of the audit entry: "Task1 -> Task2 (validate), Task3 (notify)"
-    protected static String comment(String nodeId, List<Map<String, Serializable>> transitions, List<Integer> followed) {
+    /**
+     * Human readable summary, stored as the comment of the audit entry: "Task1 -> Task2 (validate), Task3 (notify)",
+     * abbreviated to {@link #MAX_COMMENT_LENGTH} characters.
+     */
+    protected static String comment(String nodeId, List<Map<String, Serializable>> transitions,
+            List<Integer> followed) {
         if (followed.isEmpty()) {
-            return nodeId;
+            return StringUtils.abbreviate(nodeId, MAX_COMMENT_LENGTH);
         }
-        return nodeId + " -> " + followed.stream().map(i -> {
+        String comment = nodeId + " -> " + followed.stream().map(i -> {
             Map<String, Serializable> t = transitions.get(i);
             return "%s (%s)".formatted(t.get(PROP_TRANS_TARGET), t.get(PROP_TRANS_NAME));
         }).collect(Collectors.joining(", "));
+        return StringUtils.abbreviate(comment, MAX_COMMENT_LENGTH);
     }
 }

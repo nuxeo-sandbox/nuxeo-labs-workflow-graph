@@ -84,10 +84,12 @@ public final class WorkflowHistoryReader {
      * <p>
      * Allowed to administrators and to the users who can read the workflow instance or one of its attached documents
      * (in Web UI, the readers of a document can open the graph of its workflows). The data is then read with a
-     * system session: the steps and the audit of a workflow instance are not readable by every participant.
+     * system session: the steps and the audit of a workflow instance are not readable by every participant. When the
+     * audit cannot be read, the steps are still returned, without the followed transitions.
      *
      * @throws NuxeoException (400) when the id is blank
-     * @throws DocumentNotFoundException when there is no workflow instance with this id
+     * @throws DocumentNotFoundException when there is no workflow instance with this id (a workflow model is not an
+     *             instance)
      * @throws DocumentSecurityException when the user is not allowed
      */
     public static WorkflowHistory read(CoreSession session, String workflowId) {
@@ -109,7 +111,8 @@ public final class WorkflowHistoryReader {
         GraphRoute route = doc != null && doc.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET)
                 ? doc.getAdapter(GraphRoute.class)
                 : null;
-        if (route == null) {
+        // a workflow model (draft or validated) has the same facet, but it is not an instance
+        if (route == null || route.isDraft() || route.isValidated()) {
             throw new DocumentNotFoundException("No workflow instance with the id " + ref.reference());
         }
         return route;
@@ -185,17 +188,19 @@ public final class WorkflowHistoryReader {
     }
 
     private static List<LogEntry> readEntries(String workflowId) {
-        AuditService auditService = Framework.getService(AuditService.class);
-        AuditBackend backend = auditService == null ? null : auditService.getAuditBackend(DEFAULT_AUDIT_BACKEND);
-        if (backend == null) {
-            log.warn("No audit backend: the followed transitions of workflow {} cannot be read", workflowId);
-            return List.of();
-        }
         var query = new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, workflowId))
                                            .and(Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT))
                                            .order(OrderByExprs.asc(LOG_EVENT_DATE))
                                            .limit(MAX_AUDIT_ENTRIES);
-        List<LogEntry> entries = backend.queryLogs(query);
+        List<LogEntry> entries;
+        try {
+            AuditBackend backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
+            entries = backend.queryLogs(query);
+        } catch (RuntimeException e) {
+            // no audit backend, backend not reachable...: the steps, read from their documents, are still returned
+            log.warn("Cannot read the audit: the followed transitions of workflow {} are not returned", workflowId, e);
+            return List.of();
+        }
         if (entries.size() >= MAX_AUDIT_ENTRIES) {
             log.warn("Workflow {} has more than {} completed steps, the most recent ones are ignored", workflowId,
                     MAX_AUDIT_ENTRIES);

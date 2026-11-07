@@ -18,6 +18,7 @@
  */
 package nuxeo.labs.workflowgraph;
 
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
 import static org.nuxeo.audit.api.LogEntryConstants.LOG_DOC_UUID;
 import static org.nuxeo.audit.api.LogEntryConstants.LOG_EVENT_ID;
@@ -49,6 +50,8 @@ import org.nuxeo.ecm.core.query.sql.model.Predicates;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoutingService;
 import org.nuxeo.ecm.platform.routing.core.impl.GraphNode;
+import org.nuxeo.ecm.platform.task.Task;
+import org.nuxeo.ecm.platform.task.TaskService;
 import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
 
@@ -151,6 +154,19 @@ public abstract class AbstractWorkflowHistoryTest {
         AuditBackend backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
         return backend.queryLogs(new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, workflowId))
                                                         .and(Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT)));
+    }
+
+    /** The steps recorded as completed (one audit entry per completion), sorted, duplicates kept. */
+    protected List<String> recordedSteps(String workflowId) {
+        return recorderEntries(workflowId).stream()
+                                          .map(e -> e.<String> getExtendedValue(NODE_ID_KEY))
+                                          .sorted()
+                                          .toList();
+    }
+
+    /** The open tasks of a step. */
+    protected List<Task> openTasks(String workflowId, String nodeId) {
+        return Framework.getService(TaskService.class).getAllTaskInstances(workflowId, nodeId, session);
     }
 
     protected void grantRead(DocumentRef ref, String username) {

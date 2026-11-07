@@ -18,8 +18,9 @@ once all have answered. An optional call that fails only logs a `console.warn`.
 It is the simple sibling of `nuxeo-labs-custom-workflow-graph` (interactive version: details panel, Studio layout,
 legend...). The two packages conflict (`package.xml`). Names never overlap: namespace `NuxeoLabs.WorkflowGraph`
 (`LWG`), files and CSS classes `lwg-*`, i18n keys `labsWorkflowGraph.*`, elements `nuxeo-labs-workflow-graph-*`,
-Java package `nuxeo.labs.workflowgraph`, operation `LabsWorkflowGraph.*`, audited event `lwgWorkflowStepCompleted`,
-listener `lwgStepCompletedListener`, OSGi components `nuxeo.labs.workflowgraph.*`.
+Java package `nuxeo.labs.workflowgraph`, operation `LabsWorkflowGraph.*`, audited event `lwgWorkflowStepCompleted`
+and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompletedListener`, OSGi components
+`nuxeo.labs.workflowgraph.*`.
 
 ### Scope (decided with the user, keep it)
 
@@ -80,19 +81,26 @@ listener `lwgStepCompletedListener`, OSGi components `nuxeo.labs.workflowgraph.*
 
 - Maven modules: `nuxeo-labs-workflow-graph-core` (Java bundle, see below), `nuxeo-labs-workflow-graph-web` (JAR:
   web resources, OSGI-INF, i18n) and `nuxeo-labs-workflow-graph-package` (marketplace package). Version
-  `2025.2.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`.
+  `2025.2.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`. Minimum LTS 2025 hotfix: **2025.16**
+  (`nuxeo.target.version`, target platform of `package.xml`): the audit `routes` extension point used by
+  `lwg-audit-contrib.xml` exists since 2025.16. Do not lower it, nor go back to the deprecated `event` point.
 - Java bundle (`nuxeo.labs.workflowgraph`):
   - `StepCompletedListener`: synchronous `beforeDocumentModification` listener on `RouteNode` documents. A step
     completes when it is saved with a new `rnode:endDate` (dirty, and different from `PREVIOUS_DOCUMENT_MODEL`):
     the transitions with `result=true` are the followed ones (only the first with
     `rnode:executeOnlyFirstTransition`, none for an end step). It fires `lwgWorkflowStepCompleted` on the workflow
-    instance (category `Routing`, extended info `nodeId`, `transitions` = comma-separated positions). It must never
-    throw (it would break the workflow engine): errors are logged.
-  - `WorkflowHistoryReader` / `GetWorkflowHistoryOp`: access = administrator, or READ on the workflow instance or
-    on one of its attached documents (checked with the user's session); then everything is read with
-    `CoreInstance.doPrivileged`. 404 (`DocumentNotFoundException`) when the id is not a workflow instance, 403
-    (`DocumentSecurityException`). JSON = the `WorkflowHistory` record. Transitions read from the audit backend
-    (`docUUID` + `eventId`, at most `MAX_AUDIT_ENTRIES`).
+    instance (category `Routing`, event properties / extended info `lwgNodeId`, `lwgTransitions` = comma-separated
+    positions, keys prefixed because the OpenSearch audit has one mapping for all extended info; comment abbreviated
+    to `MAX_COMMENT_LENGTH`, the SQL audit column is 1024 characters). It must never throw (it would break the
+    workflow engine): errors are logged, only a `ConcurrentUpdateException` is rethrown (as the event service does).
+  - `WorkflowHistoryReader` / `GetWorkflowHistoryOp`: the workflow instance and its attached document ids are read
+    with `CoreInstance.doPrivileged` (needed for the check), then access = administrator, or READ on the workflow
+    instance or on one of its attached documents (checked with the user's session); then the history is read with
+    `CoreInstance.doPrivileged`. 404 (`DocumentNotFoundException`) when the id is not a workflow instance (workflow
+    models, `draft` or `validated`, included), 403 (`DocumentSecurityException`). JSON = the `WorkflowHistory`
+    record. Transitions read from the audit backend (`docUUID` + `eventId`, at most `MAX_AUDIT_ENTRIES`, keep it
+    <= 10000, the default OpenSearch result window); when the audit cannot be read, the steps are still returned,
+    without transitions (warning logged).
   - Nuxeo does not keep the followed transitions (`result` is reset when the target starts): transitions before
     the installation are unknown, do not try to guess them.
 - Web files: `nuxeo-labs-workflow-graph-web/src/main/resources/web/nuxeo.war/ui/nuxeo-labs-workflow-graph/`,
@@ -137,12 +145,16 @@ node dev/tools/screenshots.mjs [filter]              # filter "checks": interact
 
 # build (Java 21, Maven 3.8+), runs the Java tests (JUnit 4, FeaturesRunner, in-memory audit, H2)
 mvn clean install
+
+# Java tests with the SQL audit backend (H2) instead of the in-memory one
+mvn -pl nuxeo-labs-workflow-graph-core test -Dnuxeo.test.audit=sql
 ```
 
 Java tests: `WorkflowGraphFeature` (AuditFeature before AutomationFeature, routing deployed without blacklisting
 the routing audit), `AbstractWorkflowHistoryTest` (models built with `RouteNode` documents, steps resumed with
-`resumeInstance` and a button), `TestWorkflowHistory`, `TestWorkflowHistoryWithoutRecorder` (listener disabled by
-`test-recorder-disabled-contrib.xml`).
+`resumeInstance` and a button, tasks ended with `endTask`, `recordedSteps` = audit entries per step),
+`TestWorkflowHistory` (paths, loop, fork/merge, waiting merge, several tasks, cancellation, comment length, access,
+invalid ids), `TestWorkflowHistoryWithoutRecorder` (listener disabled by `test-recorder-disabled-contrib.xml`).
 
 Demo: `python3 -m http.server 8765` at the project root, then
 `http://localhost:8765/dev/demo/index.html?wf=large&theme=dark` (`&dir=LR` forces the direction, `&history=off`

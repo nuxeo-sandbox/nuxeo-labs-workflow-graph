@@ -21,6 +21,9 @@ package nuxeo.labs.workflowgraph;
 /**
  * Names shared by the recorder ({@link StepCompletedListener}) and the history reader
  * ({@link WorkflowHistoryReader}). They are also used in {@code OSGI-INF/lwg-audit-contrib.xml}.
+ * <p>
+ * The audit extended info keys are prefixed: in the OpenSearch audit backend, the extended info of every event share
+ * one mapping ({@code extended.<key>}), so a generic name could clash with the key of another add-on.
  *
  * @since 2025.2
  */
@@ -30,13 +33,13 @@ public final class WorkflowHistoryConstants {
     public static final String STEP_COMPLETED_EVENT = "lwgWorkflowStepCompleted";
 
     /** Event property and audit extended info: id of the completed step ({@code rnode:nodeId}). */
-    public static final String NODE_ID_KEY = "nodeId";
+    public static final String NODE_ID_KEY = "lwgNodeId";
 
     /**
      * Event property and audit extended info: positions of the transitions followed when the step completed, in
      * the definition order of the step ({@code rnode:transitions}), comma separated. Empty for an end step.
      */
-    public static final String TRANSITIONS_KEY = "transitions";
+    public static final String TRANSITIONS_KEY = "lwgTransitions";
 
     /** Separator of the positions in {@link #TRANSITIONS_KEY}. */
     public static final String TRANSITIONS_SEPARATOR = ",";
