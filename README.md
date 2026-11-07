@@ -179,6 +179,40 @@ or variable.
 - The plugin deletes nothing: Nuxeo removes the done and canceled workflow instances with its daily cleanup, their
   audit entries stay, as any audit entry.
 
+**Disabling or replacing the recorder.** The recorder is the listener `lwgStepCompletedListener` (component
+`nuxeo.labs.workflowgraph.listener`), overridden as any Nuxeo listener: listeners with the same name are merged, the
+last deployed wins. Use a Studio XML extension (the `<extension>` element is enough), or a `*-config.xml` file in
+`nxserver/config` with the `<require>` below.
+
+- Stop recording:
+
+  ```xml
+  <component name="com.example.workflowgraph.recorder.disabled">
+    <require>nuxeo.labs.workflowgraph.listener</require>
+    <extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+      <listener name="lwgStepCompletedListener" enabled="false" />
+    </extension>
+  </component>
+  ```
+
+  No audit entry is written anymore (the audit contribution of the plugin can stay, it only declares the event). The
+  graph still shows the steps done and dims the branches not followed (both come from the step documents), and the
+  transitions already recorded; the transitions followed afterwards are unknown, as before the installation.
+- Use your own recorder: same `<listener name="lwgStepCompletedListener" class="com.example.MyRecorder" />` (the
+  events are kept). It must stay synchronous (an `EventListener`: the results of the transitions are reset as soon
+  as the next step starts) and, for the graph to draw the transitions, audit `lwgWorkflowStepCompleted` on the
+  workflow instance with the `nodeId` and `transitions` extended info (see the table above). It can extend
+  `StepCompletedListener` (`handleEvent`, `record`).
+- Hide the whole history (no check badge, no trail, no dimming), with or without the recorder: disable the REST
+  binding of the operation. The call then returns 404 and the graph is drawn without the history (a warning is
+  logged in the browser console).
+
+  ```xml
+  <extension target="org.nuxeo.ecm.automation.server.AutomationServer" point="bindings">
+    <binding name="LabsWorkflowGraph.GetHistory" disabled="true" />
+  </extension>
+  ```
+
 ## Colors
 
 By default, the colors derive from the Web UI theme variables (`--nuxeo-text-default`, `--nuxeo-box`,
