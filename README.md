@@ -151,9 +151,11 @@ per completed step, on the workflow instance:
 The extended info keys start with `lwg`: in the OpenSearch audit backend, the extended info of every event share one
 mapping, a generic name could clash with the one of another add-on.
 
-The listener never breaks a workflow (an error is logged as a warning). Besides the fields above, the audit fills
-the ones of every entry (date, user who completed the step, path, type and state of the workflow instance). Nothing
-else is stored: no task comment, no workflow or step variable.
+The listener does not break a workflow: an error is logged and the workflow goes on, unless the transaction fails
+anyway (concurrent update, interrupted thread, transaction already marked for rollback), where the error is
+rethrown, as Nuxeo's event service does. Besides the fields above, the audit fills the ones of every entry (date,
+user who completed the step, path, type and state of the workflow instance). Nothing else is stored: no task
+comment, no workflow or step variable.
 
 **Operation `LabsWorkflowGraph.GetHistory`** (category "Workflow Context"), used by the dialog:
 
@@ -177,7 +179,7 @@ else is stored: no task comment, no workflow or step variable.
   (in Web UI, the readers of a document can open the graph of its workflows). The data is then read with a system
   session: the step documents and the audit of a workflow instance are not readable by every participant. Errors:
   404 when the id is not the one of a workflow instance (a workflow model is not an instance), 403 when the user is
-  not allowed. When the audit cannot be read, the steps are still returned, without the transitions (a warning is
+  not allowed. When the audit cannot be read, the steps are still returned, without the transitions (an error is
   logged on the server).
 
 **Limits.**

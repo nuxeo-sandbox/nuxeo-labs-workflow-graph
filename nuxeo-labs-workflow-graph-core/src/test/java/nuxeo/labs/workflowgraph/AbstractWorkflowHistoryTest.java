@@ -18,6 +18,7 @@
  */
 package nuxeo.labs.workflowgraph;
 
+import static java.lang.Boolean.TRUE;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
 import static org.nuxeo.audit.api.LogEntryConstants.LOG_DOC_UUID;
@@ -38,13 +39,11 @@ import jakarta.inject.Inject;
 import org.junit.Before;
 import org.nuxeo.audit.api.AuditQueryBuilder;
 import org.nuxeo.audit.api.LogEntry;
-import org.nuxeo.audit.service.AuditBackend;
 import org.nuxeo.audit.service.AuditService;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.security.ACE;
-import org.nuxeo.ecm.core.api.security.ACP;
 import org.nuxeo.ecm.core.api.security.SecurityConstants;
 import org.nuxeo.ecm.core.query.sql.model.Predicates;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
@@ -90,12 +89,13 @@ public abstract class AbstractWorkflowHistoryTest {
 
     /** Creates a step of the model. */
     protected DocumentModel node(String id, Consumer<DocumentModel> setup) {
-        DocumentModel node = session.createDocumentModel(model.getPathAsString(), id, ROUTE_NODE_DOCUMENT_TYPE);
+        var node = session.createDocumentModel(model.getPathAsString(), id, ROUTE_NODE_DOCUMENT_TYPE);
         node.setPropertyValue(GraphNode.PROP_NODE_ID, id);
         setup.accept(node);
         return session.createDocument(node);
     }
 
+    /** Creates a transition to the target step, followed when the condition is true. */
     protected static Map<String, Serializable> transition(String name, String target, String condition) {
         Map<String, Serializable> transition = new HashMap<>();
         transition.put(GraphNode.PROP_TRANS_NAME, name);
@@ -104,7 +104,7 @@ public abstract class AbstractWorkflowHistoryTest {
         return transition;
     }
 
-    // condition true when the step is resumed with this button
+    /** Returns a condition that is true when the step is resumed with this button. */
     protected static String button(String name) {
         return "NodeVariables[\"button\"] == \"%s\"".formatted(name);
     }
@@ -114,19 +114,19 @@ public abstract class AbstractWorkflowHistoryTest {
         node.setPropertyValue(GraphNode.PROP_TRANSITIONS, (Serializable) List.of(transitions));
     }
 
-    /** Model: start -> step -> end, automatic steps only. */
+    /** Creates the model start -> step -> end, automatic steps only. */
     protected void createSimpleModel() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toStep", "step", "true"));
         });
         node("step", n -> setTransitions(n, transition("toEnd", "end", "true")));
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
     }
 
     /** Validates the model, then creates and starts an instance. Returns its id. */
     protected String startWorkflow() {
-        DocumentRoute route = model.getAdapter(DocumentRoute.class);
+        var route = model.getAdapter(DocumentRoute.class);
         if (!route.isValidated()) {
             routing.validateRouteModel(route, session);
         }
@@ -148,15 +148,15 @@ public abstract class AbstractWorkflowHistoryTest {
         return WorkflowHistoryReader.read(session, workflowId);
     }
 
-    /** The audit entries written by the recorder for the workflow instance. */
+    /** Returns the audit entries written by the recorder for the workflow instance. */
     protected List<LogEntry> recorderEntries(String workflowId) {
         txFeature.nextTransaction();
-        AuditBackend backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
+        var backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
         return backend.queryLogs(new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, workflowId))
                                                         .and(Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT)));
     }
 
-    /** The steps recorded as completed (one audit entry per completion), sorted, duplicates kept. */
+    /** Returns the steps recorded as completed (one audit entry per completion), sorted, duplicates kept. */
     protected List<String> recordedSteps(String workflowId) {
         return recorderEntries(workflowId).stream()
                                           .map(e -> e.<String> getExtendedValue(NODE_ID_KEY))
@@ -164,20 +164,21 @@ public abstract class AbstractWorkflowHistoryTest {
                                           .toList();
     }
 
-    /** The open tasks of a step. */
+    /** Returns the open tasks of a step. */
     protected List<Task> openTasks(String workflowId, String nodeId) {
         return Framework.getService(TaskService.class).getAllTaskInstances(workflowId, nodeId, session);
     }
 
+    /** Grants READ to the user on the document, then commits. */
     protected void grantRead(DocumentRef ref, String username) {
-        ACP acp = session.getACP(ref);
+        var acp = session.getACP(ref);
         acp.getOrCreateACL("lwgtest").add(new ACE(username, SecurityConstants.READ, true));
         session.setACP(ref, acp, true);
         session.save();
         txFeature.nextTransaction();
     }
 
-    /** The steps of the history as sorted "id:completed:starts" strings. */
+    /** Returns the steps of the history as sorted "id:completed:starts" strings. */
     protected static List<String> steps(WorkflowHistory history) {
         return history.nodes()
                       .stream()
@@ -186,7 +187,7 @@ public abstract class AbstractWorkflowHistoryTest {
                       .toList();
     }
 
-    /** The followed transitions of the history as sorted "source#index>target(name)=count" strings. */
+    /** Returns the followed transitions of the history as sorted "source#index>target(name)=count" strings. */
     protected static List<String> transitions(WorkflowHistory history) {
         return history.transitions()
                       .stream()

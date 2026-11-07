@@ -28,6 +28,7 @@ import org.nuxeo.ecm.automation.core.annotations.Param;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.api.CoreSession;
+import org.nuxeo.ecm.core.api.NuxeoException;
 
 /**
  * Returns the history of a graph workflow instance as JSON, used by the workflow graph of Web UI to mark the steps
@@ -52,7 +53,12 @@ public class GetWorkflowHistoryOp {
     protected String workflowId;
 
     @OperationMethod
-    public Blob run() throws IOException {
-        return Blobs.createJSONBlobFromValue(WorkflowHistoryReader.read(session, workflowId));
+    public Blob run() {
+        var history = WorkflowHistoryReader.read(session, workflowId);
+        try {
+            return Blobs.createJSONBlobFromValue(history);
+        } catch (IOException e) {
+            throw new NuxeoException("Cannot write the history of the workflow instance " + workflowId, e);
+        }
     }
 }

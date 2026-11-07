@@ -18,6 +18,8 @@
  */
 package nuxeo.labs.workflowgraph;
 
+import static java.lang.Boolean.TRUE;
+import static java.util.stream.Collectors.joining;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_KEY;
@@ -41,21 +43,19 @@ import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.nuxeo.common.utils.ExceptionUtils;
 import org.nuxeo.ecm.core.api.ConcurrentUpdateException;
-import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
-import org.nuxeo.ecm.core.api.DocumentRef;
-import org.nuxeo.ecm.core.api.model.Property;
 import org.nuxeo.ecm.core.event.Event;
 import org.nuxeo.ecm.core.event.EventListener;
 import org.nuxeo.ecm.core.event.EventService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.transaction.TransactionHelper;
 
 /**
  * Records the transitions followed by graph workflows, which Nuxeo does not keep.
@@ -66,8 +66,9 @@ import org.nuxeo.runtime.api.Framework;
  * {@link WorkflowHistoryConstants#STEP_COMPLETED_EVENT} on the workflow instance. The event is audited (see
  * {@code OSGI-INF/lwg-audit-contrib.xml}), with the id of the step and the positions of the followed transitions.
  * <p>
- * The history is a nice-to-have: any error is logged and never breaks the workflow. Only a
- * {@link ConcurrentUpdateException} is rethrown, as the event service does: the transaction fails anyway.
+ * The history is a nice-to-have: an error is logged and does not break the workflow. As in the event service, an
+ * error is only rethrown when the transaction fails anyway: a {@link ConcurrentUpdateException}, an interrupted
+ * thread, or a transaction already marked rollback-only.
  *
  * @since 2025.2
  */
@@ -86,7 +87,7 @@ public class StepCompletedListener implements EventListener {
         if (!(event.getContext() instanceof DocumentEventContext docCtx)) {
             return;
         }
-        DocumentModel node = docCtx.getSourceDocument();
+        var node = docCtx.getSourceDocument();
         // called for every saved document: leave as soon as possible
         if (node == null || !ROUTE_NODE_DOCUMENT_TYPE.equals(node.getType())) {
             return;
@@ -99,17 +100,23 @@ public class StepCompletedListener implements EventListener {
             // never swallowed, as in the event service: the transaction fails and must be retried
             throw e;
         } catch (RuntimeException e) {
-            log.warn("Cannot record the transitions followed by the workflow step of the document {}", node.getId(),
+            // an interrupt is never swallowed
+            ExceptionUtils.checkInterrupt(e);
+            if (TransactionHelper.isTransactionMarkedRollback()) {
+                // the transaction fails anyway: report the cause, as the event service does
+                throw e;
+            }
+            log.error("Cannot record the transitions followed by the workflow step of the document {}", node.getId(),
                     e);
         }
     }
 
     /**
-     * True when the step is being saved with a new end date, which the workflow engine sets only when the step
-     * completes (not when it is canceled).
+     * Returns true when the step is being saved with a new end date, which the workflow engine sets only when the
+     * step completes (not when it is canceled).
      */
     protected static boolean isCompletion(DocumentModel node, DocumentEventContext docCtx) {
-        Property endDate = node.getProperty(PROP_NODE_END_DATE);
+        var endDate = node.getProperty(PROP_NODE_END_DATE);
         if (!endDate.isDirty() || !(endDate.getValue() instanceof Calendar after)) {
             return false;
         }
@@ -121,17 +128,17 @@ public class StepCompletedListener implements EventListener {
     }
 
     protected void record(DocumentEventContext docCtx, DocumentModel node) {
-        CoreSession session = docCtx.getCoreSession();
-        DocumentRef parentRef = node.getParentRef();
+        var session = docCtx.getCoreSession();
+        var parentRef = node.getParentRef();
         if (session == null || parentRef == null) {
             return;
         }
         // the workflow engine runs with a system session: the workflow instance (the parent) can be read
-        DocumentModel route = session.getDocument(parentRef);
+        var route = session.getDocument(parentRef);
         if (!route.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET)) {
             return;
         }
-        String nodeId = (String) node.getPropertyValue(PROP_NODE_ID);
+        var nodeId = (String) node.getPropertyValue(PROP_NODE_ID);
         List<Map<String, Serializable>> transitions = transitions(node);
         List<Integer> followed = followedTransitions(node, transitions);
 
@@ -139,14 +146,14 @@ public class StepCompletedListener implements EventListener {
         properties.put(DocumentEventContext.CATEGORY_PROPERTY_KEY, ROUTING_CATEGORY);
         properties.put(DocumentEventContext.COMMENT_PROPERTY_KEY, comment(nodeId, transitions, followed));
         properties.put(NODE_ID_KEY, nodeId);
-        properties.put(TRANSITIONS_KEY,
-                followed.stream().map(String::valueOf).collect(Collectors.joining(TRANSITIONS_SEPARATOR)));
+        properties.put(TRANSITIONS_KEY, followed.stream().map(String::valueOf).collect(joining(TRANSITIONS_SEPARATOR)));
         var ctx = new DocumentEventContext(session, docCtx.getPrincipal(), route);
         ctx.setProperties(properties);
         Framework.getService(EventService.class).fireEvent(ctx.newEvent(STEP_COMPLETED_EVENT));
         log.debug("Step {} of workflow {} completed, followed transitions: {}", nodeId, route.getId(), followed);
     }
 
+    /** Returns the transitions of the step ({@code rnode:transitions}), never null. */
     @SuppressWarnings("unchecked")
     protected static List<Map<String, Serializable>> transitions(DocumentModel node) {
         var value = (List<Map<String, Serializable>>) node.getPropertyValue(PROP_TRANSITIONS);
@@ -154,19 +161,19 @@ public class StepCompletedListener implements EventListener {
     }
 
     /**
-     * Positions of the transitions followed by the engine: those evaluated to true, only the first one when the step
-     * executes only its first true transition (the ones after it are not evaluated and keep an old result), none for
-     * an end step (the workflow ends there, its transitions are ignored).
+     * Returns the positions of the transitions followed by the engine: those evaluated to true, only the first one
+     * when the step executes only its first true transition (the ones after it are not evaluated and keep an old
+     * result), none for an end step (the workflow ends there, its transitions are ignored).
      */
     protected static List<Integer> followedTransitions(DocumentModel node,
             List<Map<String, Serializable>> transitions) {
         List<Integer> followed = new ArrayList<>();
-        if (Boolean.TRUE.equals(node.getPropertyValue(PROP_STOP))) {
+        if (TRUE.equals(node.getPropertyValue(PROP_STOP))) {
             return followed;
         }
-        boolean onlyFirst = Boolean.TRUE.equals(node.getPropertyValue(PROP_EXECUTE_ONLY_FIRST_TRANSITION));
+        boolean onlyFirst = TRUE.equals(node.getPropertyValue(PROP_EXECUTE_ONLY_FIRST_TRANSITION));
         for (int i = 0; i < transitions.size(); i++) {
-            if (Boolean.TRUE.equals(transitions.get(i).get(PROP_TRANS_RESULT))) {
+            if (TRUE.equals(transitions.get(i).get(PROP_TRANS_RESULT))) {
                 followed.add(i);
                 if (onlyFirst) {
                     break;
@@ -177,8 +184,8 @@ public class StepCompletedListener implements EventListener {
     }
 
     /**
-     * Human readable summary, stored as the comment of the audit entry: "Task1 -> Task2 (validate), Task3 (notify)",
-     * abbreviated to {@link #MAX_COMMENT_LENGTH} characters.
+     * Returns a human readable summary, stored as the comment of the audit entry and abbreviated to
+     * {@link #MAX_COMMENT_LENGTH} characters: "Task1 -> Task2 (validate), Task3 (notify)".
      */
     protected static String comment(String nodeId, List<Map<String, Serializable>> transitions,
             List<Integer> followed) {
@@ -186,9 +193,9 @@ public class StepCompletedListener implements EventListener {
             return StringUtils.abbreviate(nodeId, MAX_COMMENT_LENGTH);
         }
         String comment = nodeId + " -> " + followed.stream().map(i -> {
-            Map<String, Serializable> t = transitions.get(i);
+            var t = transitions.get(i);
             return "%s (%s)".formatted(t.get(PROP_TRANS_TARGET), t.get(PROP_TRANS_NAME));
-        }).collect(Collectors.joining(", "));
+        }).collect(joining(", "));
         return StringUtils.abbreviate(comment, MAX_COMMENT_LENGTH);
     }
 }

@@ -91,8 +91,9 @@ and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompleted
     `rnode:executeOnlyFirstTransition`, none for an end step). It fires `lwgWorkflowStepCompleted` on the workflow
     instance (category `Routing`, event properties / extended info `lwgNodeId`, `lwgTransitions` = comma-separated
     positions, keys prefixed because the OpenSearch audit has one mapping for all extended info; comment abbreviated
-    to `MAX_COMMENT_LENGTH`, the SQL audit column is 1024 characters). It must never throw (it would break the
-    workflow engine): errors are logged, only a `ConcurrentUpdateException` is rethrown (as the event service does).
+    to `MAX_COMMENT_LENGTH`, the SQL audit column is 1024 characters). It must not break the workflow engine: errors
+    are logged (`log.error`) and swallowed, except when the transaction fails anyway, as in the event service:
+    `ConcurrentUpdateException`, interrupt (`ExceptionUtils.checkInterrupt`), transaction marked rollback-only.
   - `WorkflowHistoryReader` / `GetWorkflowHistoryOp`: the workflow instance and its attached document ids are read
     with `CoreInstance.doPrivileged` (needed for the check), then access = administrator, or READ on the workflow
     instance or on one of its attached documents (checked with the user's session); then the history is read with
@@ -100,7 +101,7 @@ and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompleted
     models, `draft` or `validated`, included), 403 (`DocumentSecurityException`). JSON = the `WorkflowHistory`
     record. Transitions read from the audit backend (`docUUID` + `eventId`, at most `MAX_AUDIT_ENTRIES`, keep it
     <= 10000, the default OpenSearch result window); when the audit cannot be read, the steps are still returned,
-    without transitions (warning logged).
+    without transitions (error logged, interrupts not swallowed).
   - Nuxeo does not keep the followed transitions (`result` is reset when the target starts): transitions before
     the installation are unknown, do not try to guess them.
 - Web files: `nuxeo-labs-workflow-graph-web/src/main/resources/web/nuxeo.war/ui/nuxeo-labs-workflow-graph/`,

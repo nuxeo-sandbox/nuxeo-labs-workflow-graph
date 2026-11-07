@@ -35,17 +35,17 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.nuxeo.audit.api.AuditQueryBuilder;
 import org.nuxeo.audit.api.LogEntry;
-import org.nuxeo.audit.service.AuditBackend;
 import org.nuxeo.audit.service.AuditService;
+import org.nuxeo.common.utils.ExceptionUtils;
 import org.nuxeo.ecm.core.api.CoreInstance;
 import org.nuxeo.ecm.core.api.CoreSession;
-import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.DocumentNotFoundException;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
@@ -65,17 +65,18 @@ import org.nuxeo.runtime.api.Framework;
  *
  * @since 2025.2
  */
-public final class WorkflowHistoryReader {
+public class WorkflowHistoryReader {
 
     private static final Logger log = LogManager.getLogger(WorkflowHistoryReader.class);
 
     /** Maximum number of audit entries read for one workflow instance (one entry per completed step). */
     public static final int MAX_AUDIT_ENTRIES = 10_000;
 
-    private record Key(String nodeId, int index) {
+    /** A transition of a step: id of the step and position of the transition in the step. */
+    protected record Key(String nodeId, int index) {
     }
 
-    private WorkflowHistoryReader() {
+    protected WorkflowHistoryReader() {
         // static methods only
     }
 
@@ -106,9 +107,9 @@ public final class WorkflowHistoryReader {
         return CoreInstance.doPrivileged(session, (CoreSession s) -> build(getRoute(s, ref), workflowId));
     }
 
-    private static GraphRoute getRoute(CoreSession session, IdRef ref) {
-        DocumentModel doc = session.exists(ref) ? session.getDocument(ref) : null;
-        GraphRoute route = doc != null && doc.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET)
+    protected static GraphRoute getRoute(CoreSession session, IdRef ref) {
+        var doc = session.exists(ref) ? session.getDocument(ref) : null;
+        var route = doc != null && doc.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET)
                 ? doc.getAdapter(GraphRoute.class)
                 : null;
         // a workflow model (draft or validated) has the same facet, but it is not an instance
@@ -118,7 +119,7 @@ public final class WorkflowHistoryReader {
         return route;
     }
 
-    private static boolean canRead(CoreSession session, DocumentRef ref, List<String> attachedDocumentIds) {
+    protected static boolean canRead(CoreSession session, DocumentRef ref, List<String> attachedDocumentIds) {
         if (session.getPrincipal().isAdministrator() || hasRead(session, ref)) {
             return true;
         }
@@ -127,7 +128,7 @@ public final class WorkflowHistoryReader {
                         new IdRef(id)));
     }
 
-    private static boolean hasRead(CoreSession session, DocumentRef ref) {
+    protected static boolean hasRead(CoreSession session, DocumentRef ref) {
         try {
             return session.exists(ref) && session.hasPermission(ref, SecurityConstants.READ);
         } catch (DocumentNotFoundException e) {
@@ -135,12 +136,12 @@ public final class WorkflowHistoryReader {
         }
     }
 
-    private static WorkflowHistory build(GraphRoute route, String workflowId) {
+    protected static WorkflowHistory build(GraphRoute route, String workflowId) {
         List<WorkflowHistory.Step> steps = new ArrayList<>();
         Map<String, GraphNode> nodes = new HashMap<>();
-        for (GraphNode node : route.getNodes()) {
+        for (var node : route.getNodes()) {
             nodes.put(node.getId(), node);
-            DocumentModel doc = node.getDocument();
+            var doc = node.getDocument();
             boolean completed = doc.getPropertyValue(PROP_NODE_END_DATE) != null;
             long starts = doc.getPropertyValue(PROP_COUNT) instanceof Number n ? n.longValue() : 0;
             if (completed || starts > 0) {
@@ -150,8 +151,8 @@ public final class WorkflowHistoryReader {
         return new WorkflowHistory(workflowId, steps, followedTransitions(nodes, workflowId));
     }
 
-    // Counts the transitions found in the audit entries, in the order they were first followed.
-    private static List<WorkflowHistory.FollowedTransition> followedTransitions(Map<String, GraphNode> nodes,
+    /** Counts the transitions found in the audit entries, in the order they were first followed. */
+    protected static List<WorkflowHistory.FollowedTransition> followedTransitions(Map<String, GraphNode> nodes,
             String workflowId) {
         Map<Key, Long> counts = new LinkedHashMap<>();
         for (LogEntry entry : readEntries(workflowId)) {
@@ -159,8 +160,8 @@ public final class WorkflowHistoryReader {
             if (extended == null) {
                 continue;
             }
-            String nodeId = asString(extended.get(NODE_ID_KEY));
-            String positions = asString(extended.get(TRANSITIONS_KEY));
+            String nodeId = Objects.toString(extended.get(NODE_ID_KEY), null);
+            String positions = Objects.toString(extended.get(TRANSITIONS_KEY), null);
             if (StringUtils.isBlank(nodeId) || StringUtils.isBlank(positions)) {
                 continue;
             }
@@ -174,31 +175,34 @@ public final class WorkflowHistoryReader {
         }
         List<WorkflowHistory.FollowedTransition> result = new ArrayList<>(counts.size());
         counts.forEach((key, count) -> {
-            GraphNode node = nodes.get(key.nodeId());
+            var node = nodes.get(key.nodeId());
             List<Transition> transitions = node == null ? List.of() : node.getOutputTransitions();
             if (key.index() < 0 || key.index() >= transitions.size()) {
                 log.debug("Unknown transition {} of step {} in the audit of workflow {}", key.index(), key.nodeId(),
                         workflowId);
                 return;
             }
-            Transition t = transitions.get(key.index());
+            var t = transitions.get(key.index());
             result.add(new WorkflowHistory.FollowedTransition(key.nodeId(), key.index(), t.id, t.target, count));
         });
         return result;
     }
 
-    private static List<LogEntry> readEntries(String workflowId) {
+    protected static List<LogEntry> readEntries(String workflowId) {
         var query = new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, workflowId))
                                            .and(Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT))
                                            .order(OrderByExprs.asc(LOG_EVENT_DATE))
                                            .limit(MAX_AUDIT_ENTRIES);
         List<LogEntry> entries;
         try {
-            AuditBackend backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
+            var backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
             entries = backend.queryLogs(query);
         } catch (RuntimeException e) {
+            // an interrupt is never swallowed
+            ExceptionUtils.checkInterrupt(e);
             // no audit backend, backend not reachable...: the steps, read from their documents, are still returned
-            log.warn("Cannot read the audit: the followed transitions of workflow {} are not returned", workflowId, e);
+            log.error("Cannot read the audit: the followed transitions of workflow {} are not returned", workflowId,
+                    e);
             return List.of();
         }
         if (entries.size() >= MAX_AUDIT_ENTRIES) {
@@ -206,9 +210,5 @@ public final class WorkflowHistoryReader {
                     MAX_AUDIT_ENTRIES);
         }
         return entries;
-    }
-
-    private static String asString(Object value) {
-        return value == null ? null : value.toString();
     }
 }

@@ -59,6 +59,18 @@
       <artifactId>nuxeo-runtime</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- TransactionHelper (listener: rethrow when the transaction is marked rollback-only) -->
+    <dependency>
+      <groupId>org.nuxeo.runtime</groupId>
+      <artifactId>nuxeo-runtime-jtajca</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- ExceptionUtils.checkInterrupt -->
+    <dependency>
+      <groupId>org.nuxeo.common</groupId>
+      <artifactId>nuxeo-common</artifactId>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-api</artifactId>

@@ -32,7 +32,14 @@ import java.util.List;
  */
 public record WorkflowHistory(String workflowId, List<Step> nodes, List<FollowedTransition> transitions) {
 
+    public WorkflowHistory {
+        nodes = List.copyOf(nodes);
+        transitions = List.copyOf(transitions);
+    }
+
     /**
+     * A step that started at least once.
+     *
      * @param id the id of the step ({@code rnode:nodeId}), as in the graph endpoint
      * @param completed true when the step completed at least once ({@code rnode:endDate} is set)
      * @param starts number of times the step started ({@code rnode:count}), including the current run and the runs
@@ -42,6 +49,8 @@ public record WorkflowHistory(String workflowId, List<Step> nodes, List<Followed
     }
 
     /**
+     * A transition followed at least once since the recorder is installed.
+     *
      * @param source id of the step the transition leaves
      * @param index position of the transition in its step (definition order, the order of the graph endpoint)
      * @param name name of the transition

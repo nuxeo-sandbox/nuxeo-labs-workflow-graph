@@ -18,6 +18,8 @@
  */
 package nuxeo.labs.workflowgraph;
 
+import static java.lang.Boolean.TRUE;
+import static java.util.stream.Collectors.toMap;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_KEY;
 import static org.junit.Assert.assertEquals;
@@ -30,7 +32,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import jakarta.inject.Inject;
 
@@ -42,7 +43,6 @@ import org.nuxeo.ecm.automation.AutomationService;
 import org.nuxeo.ecm.automation.OperationContext;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreInstance;
-import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentNotFoundException;
 import org.nuxeo.ecm.core.api.DocumentSecurityException;
 import org.nuxeo.ecm.core.api.IdRef;
@@ -87,8 +87,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         List<LogEntry> entries = recorderEntries(id);
         assertEquals(3, entries.size());
         Map<String, LogEntry> byNode = entries.stream()
-                                              .collect(Collectors.toMap(e -> e.getExtendedValue(NODE_ID_KEY),
-                                                      e -> e));
+                                              .collect(toMap(e -> e.getExtendedValue(NODE_ID_KEY), e -> e));
         assertEquals("0", byNode.get("start").getExtendedValue(TRANSITIONS_KEY));
         assertTrue(StringUtils.isEmpty(byNode.get("end").getExtendedValue(TRANSITIONS_KEY)));
         assertEquals("start -> step (toStep)", byNode.get("start").getComment());
@@ -101,15 +100,15 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testLoopWithTask() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toReview", "review", "true"));
         });
         node("review", n -> {
-            n.setPropertyValue(GraphNode.PROP_HAS_TASK, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, TRUE);
             setTransitions(n, transition("reject", "review", button("reject")),
                     transition("validate", "end", button("validate")));
         });
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
         // the review is the current step: started, not completed
@@ -133,14 +132,14 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testForkAndMerge() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toA", "a", "true"), transition("toB", "b", "true"));
         });
         node("a", n -> setTransitions(n, transition("aToMerge", "merge", "true")));
         node("b", n -> setTransitions(n, transition("bToMerge", "merge", "true")));
         node("merge", n -> {
             n.setPropertyValue(GraphNode.PROP_MERGE, "all");
-            n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_STOP, TRUE);
         });
         String id = startWorkflow();
 
@@ -153,15 +152,15 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testExecuteOnlyFirstTransition() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
-            n.setPropertyValue(GraphNode.PROP_EXECUTE_ONLY_FIRST_TRANSITION, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
+            n.setPropertyValue(GraphNode.PROP_EXECUTE_ONLY_FIRST_TRANSITION, TRUE);
             setTransitions(n, transition("never", "a", "false"), transition("first", "b", "true"),
                     transition("second", "c", "true"));
         });
         node("a", n -> setTransitions(n, transition("aToEnd", "end", "true")));
         node("b", n -> setTransitions(n, transition("bToEnd", "end", "true")));
         node("c", n -> setTransitions(n, transition("cToEnd", "end", "true")));
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
         WorkflowHistory history = history(id);
@@ -172,14 +171,14 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testCanceledWorkflow() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toReview", "review", "true"));
         });
         node("review", n -> {
-            n.setPropertyValue(GraphNode.PROP_HAS_TASK, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, TRUE);
             setTransitions(n, transition("validate", "end", button("validate")));
         });
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
         session.getDocument(new IdRef(id)).getAdapter(DocumentRoute.class).cancel(session);
@@ -195,15 +194,15 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testStepWithSeveralTasks() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toReview", "review", "true"));
         });
         node("review", n -> {
-            n.setPropertyValue(GraphNode.PROP_HAS_MULTIPLE_TASKS, Boolean.TRUE);
-            n.setPropertyValue(GraphNode.PROP_TASK_ASSIGNEES, new String[] { "john", "jane" });
+            n.setPropertyValue(GraphNode.PROP_HAS_MULTIPLE_TASKS, TRUE);
+            n.setPropertyValue(GraphNode.PROP_TASK_ASSIGNEES, (Serializable) List.of("john", "jane"));
             setTransitions(n, transition("validate", "end", "true"));
         });
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
         assertEquals(2, openTasks(id, "review").size());
 
@@ -221,23 +220,23 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     @Test
     public void testMergeWaitingForAnotherBranch() {
         node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
             setTransitions(n, transition("toA", "a", "true"), transition("toB", "b", "true"));
         });
         node("a", n -> setTransitions(n, transition("aToMerge", "merge", "true")));
         node("b", n -> {
-            n.setPropertyValue(GraphNode.PROP_HAS_TASK, Boolean.TRUE);
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, TRUE);
             setTransitions(n, transition("bToMerge", "merge", button("done")));
         });
         node("merge", n -> {
             n.setPropertyValue(GraphNode.PROP_MERGE, "all");
             setTransitions(n, transition("toEnd", "end", "true"));
         });
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, Boolean.TRUE));
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
         // "a" is done, "b" waits for its task: the merge waits for "b", it never started
-        GraphRoute graph = session.getDocument(new IdRef(id)).getAdapter(GraphRoute.class);
+        var graph = session.getDocument(new IdRef(id)).getAdapter(GraphRoute.class);
         assertEquals(State.WAITING, graph.getNode("merge").getState());
         assertEquals(List.of("a", "start"), recordedSteps(id));
         WorkflowHistory history = history(id);
@@ -277,7 +276,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
 
         JsonNode json;
         try (OperationContext ctx = new OperationContext(session)) {
-            Blob blob = (Blob) automationService.run(ctx, GetWorkflowHistoryOp.ID, Map.of("workflowId", id));
+            var blob = (Blob) automationService.run(ctx, GetWorkflowHistoryOp.ID, Map.of("workflowId", id));
             assertEquals("application/json", blob.getMimeType());
             json = new ObjectMapper().readTree(blob.getString());
         }
@@ -302,7 +301,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         String id = startWorkflow();
         txFeature.nextTransaction();
 
-        CoreSession john = CoreInstance.getCoreSession(session.getRepositoryName(),
+        var john = CoreInstance.getCoreSession(session.getRepositoryName(),
                 new UserPrincipal("john", List.of(), false, false));
         assertThrows(DocumentSecurityException.class, () -> WorkflowHistoryReader.read(john, id));
 
@@ -317,7 +316,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         String id = startWorkflow();
         txFeature.nextTransaction();
 
-        CoreSession jane = CoreInstance.getCoreSession(session.getRepositoryName(),
+        var jane = CoreInstance.getCoreSession(session.getRepositoryName(),
                 new UserPrincipal("jane", List.of(), false, false));
         assertThrows(DocumentSecurityException.class, () -> WorkflowHistoryReader.read(jane, id));
 
@@ -331,7 +330,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         String id = startWorkflow();
         txFeature.nextTransaction();
 
-        CoreSession admin = CoreInstance.getCoreSession(session.getRepositoryName(),
+        var admin = CoreInstance.getCoreSession(session.getRepositoryName(),
                 new UserPrincipal("boss", List.of(), false, true));
         assertEquals(2, WorkflowHistoryReader.read(admin, id).transitions().size());
     }
@@ -342,7 +341,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
                 () -> WorkflowHistoryReader.read(session, "00000000-0000-0000-0000-000000000000"));
         // a document that is not a workflow instance
         assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, file.getId()));
-        NuxeoException e = assertThrows(NuxeoException.class, () -> WorkflowHistoryReader.read(session, " "));
+        var e = assertThrows(NuxeoException.class, () -> WorkflowHistoryReader.read(session, " "));
         assertEquals(400, e.getStatusCode());
 
         // workflow models (draft, then validated) and steps are not workflow instances
@@ -359,7 +358,8 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         assertEquals(3, WorkflowHistoryReader.read(session, id).nodes().size());
     }
 
-    private static List<JsonNode> sortedBySource(JsonNode array) {
+    /** Returns the elements of the JSON array, sorted by source. */
+    protected static List<JsonNode> sortedBySource(JsonNode array) {
         List<JsonNode> list = new ArrayList<>();
         array.forEach(list::add);
         list.sort(Comparator.comparing((JsonNode n) -> n.get("source").asText()));
