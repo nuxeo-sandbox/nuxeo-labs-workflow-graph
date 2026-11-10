@@ -222,11 +222,17 @@ also for its own workflow events.
   removed the workflow instance (Web UI only opens the graph of the running workflows, though).
 
 **Disabling or replacing the recorder.** The recorder is the listener `lwgStepCompletedListener` (component
-`nuxeo.labs.workflowgraph.listener`), overridden as any Nuxeo listener: listeners with the same name are merged, the
-last deployed wins. Use a Studio XML extension (the `<extension>` element is enough), or a `*-config.xml` file in
-`nxserver/config` with the `<require>` below.
+`nuxeo.labs.workflowgraph.listener`), overridden as any Nuxeo listener: add `enabled="false"`.
 
-- Stop recording:
+- *Stop recording* with an XML Extension in Studio:
+
+```xml
+<extension target="org.nuxeo.ecm.core.event.EventServiceComponent" point="listener">
+  <listener name="lwgStepCompletedListener" enabled="false" />
+</extension>
+```
+
+- *Stop recording* with an XML contribution in a plugin:
 
   ```xml
   <component name="com.example.workflowgraph.recorder.disabled">
@@ -237,10 +243,11 @@ last deployed wins. Use a Studio XML extension (the `<extension>` element is eno
   </component>
   ```
 
-  No audit entry is written anymore (the audit contribution of the plugin can stay, it only declares the event). The
-  entries already written stay in the audit of the documents and are still shown by the graph; the steps done and
-  the transitions followed afterwards are unknown, as before the installation.
-- Use your own recorder: same `<listener name="lwgStepCompletedListener" class="com.example.MyRecorder" />` (the
+No audit entry is written anymore (the audit contribution of the plugin can stay, it only declares the event).
+The entries already written stay in the audit of the documents and are still shown by the graph; the steps done
+and the transitions followed afterwards are unknown, as before the installation.
+
+- *Use your own recorder*: same `<listener name="lwgStepCompletedListener" class="com.example.MyRecorder" />` (the
   events are kept). It must stay synchronous (an `EventListener`: the results of the transitions are reset as soon
   as the next step starts) and, for the graph to draw the history, fire `lwgWorkflowStepCompleted` on the attached
   documents with the event properties `lwgWorkflowId`, `lwgModelName`, `lwgNodeId`, `lwgTransitions`,
@@ -416,12 +423,13 @@ The package is available in Nuxeo Marketplace. So, for example, you can just add
 
 ## Support
 
-These features are not part of the Nuxeo Production platform. They are not supported, and are provided
-without warranty of any kind. Use them at your own risk.
+**These features are not part of the Nuxeo Production platform.**
+
+These solutions are not supported, and are provided for inspiration and we encourage customers to use
+them as code samples and learning resources.
 
 > [!TIP]
-> The Nuxeo Product Team *may* integrate the changes in the platform, but there are many other priorities.
-> So, if you need this feature,  **we strongly recommend a Nuxeo Partner or your dev team forks the code
+> If you need this feature,  **we strongly recommend a Nuxeo Partner or your dev team forks the code
 > and takes ownership** (tuning, maintenance, support)
 
 ## License
