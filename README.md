@@ -17,13 +17,13 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
   * Direction of the layout.
 * Colors can be changed with CSS
 
-![The graph in the Web UI dialog](README-Images/dialog-serial.png)
+![The graph in the Web UI dialog](README-Images/serial-review-2-fit.png)
 
-| A large workflow opens zoomed on its current steps | `F`: the whole workflow, current steps still visible |
+| A large workflow opens zoomed on its current steps | `f`: the whole workflow (`c` to switch back to current node) |
 | --- | --- |
-| ![Large workflow, current steps](README-Images/dialog-large-current.png) | ![Large workflow, fitted](README-Images/dialog-large-fit.png) |
-| ![Left to right](README-Images/dialog-serial-LR.png) | ![Left to right, Hyland dark theme](README-Images/contract-hyland-dark-LR.png) |
-| ![Hyland dark theme](README-Images/contract-hyland-dark.png) | ![Dark theme, French](README-Images/serial-dark-fr.png) |
+| ![Large workflow, current steps](README-Images/complex-workflow-1-opening.png) | ![Large workflow, fitted](README-Images/complex-workflow-2-fit.png) |
+| `Right arrow` to swith Left to Right | |
+| ![Left to right](README-Images/complex-workflow-3-LR-opening.png) | ![Left to right, Hyland dark theme](README-Images/complex-workflow-4-LR-fit.png) |
 
 ## Requirements
 
