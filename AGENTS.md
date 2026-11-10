@@ -97,7 +97,7 @@ audit entries, `eventType.lwgWorkflowStepCompleted`, `activity.lwgWorkflowStepCo
 
 - Maven modules: `nuxeo-labs-workflow-graph-core` (Java bundle, see below), `nuxeo-labs-workflow-graph-web` (JAR:
   web resources, OSGI-INF, i18n) and `nuxeo-labs-workflow-graph-package` (marketplace package). Version
-  `2025.2.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`. Minimum LTS 2025 hotfix: **2025.16**
+  `2025.3.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`. Minimum LTS 2025 hotfix: **2025.16**
   (`nuxeo.target.version`, target platform of `package.xml`): the audit `routes` extension point used by
   `lwg-audit-contrib.xml` exists since 2025.16. Do not lower it, nor go back to the deprecated `event` point.
 - Java bundle (`nuxeo.labs.workflowgraph`), the recorder only:
