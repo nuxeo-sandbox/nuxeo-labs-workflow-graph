@@ -9,7 +9,7 @@
 
   <groupId>nuxeo.labs.workflowgraph</groupId>
   <artifactId>nuxeo-labs-workflow-graph-parent</artifactId>
-  <version>2025.2.0-SNAPSHOT</version>
+  <version>2025.3.0-SNAPSHOT</version>
   <name>Nuxeo Labs Workflow Graph</name>
   <description>Simple, modern, read-only workflow graph for Nuxeo Web UI, with the steps already done</description>
   <packaging>pom</packaging>
