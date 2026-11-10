@@ -6,21 +6,33 @@ and machine-specific paths.
 ## Project
 
 Nuxeo LTS 2025 Web UI plugin: a simple, read-only replacement of the "View Graph" dialog of Web UI (the
-`nuxeo-workflow-graph` element, jsPlumb), plus, since 2025.2, a small Java bundle for the history of a workflow
-(steps already done, transitions already followed). It patches `nuxeo-workflow-graph.show()` once the element is
-defined (`lwg-override.js`); the default `show()` is kept as a fallback (dialog not available, layout failure).
+`nuxeo-workflow-graph` element, jsPlumb), plus, since 2025.2, a small Java bundle that records the history of a
+workflow (steps already done, transitions already followed) in the audit of its attached documents. It patches
+`nuxeo-workflow-graph.show()` once the element is defined (`lwg-override.js`); the default `show()` is kept as a
+fallback (dialog not available, layout failure).
 There is **no setting** to turn the plugin off (removed on purpose: it needed a restart, like uninstalling the
 package); do not add one back.
-Data: `GET /api/v1/workflow/{id}/graph` (required), `GET /api/v1/workflow/{id}` (title and model name, optional)
-and the `LabsWorkflowGraph.GetHistory` operation (history, optional), requested in parallel; the graph is drawn
-once all have answered. An optional call that fails only logs a `console.warn`.
+Data: `GET /api/v1/workflow/{id}/graph` (required), `GET /api/v1/workflow/{id}` (title, model name, attached
+documents, optional; 403 for the users who only read the document) and `GET /api/v1/id/{docId}/@audit` (history,
+optional), requested in parallel; the graph is drawn once all have answered. An optional call that fails only logs
+a `console.warn`. **No server operation, no privileged read** (decided with the user): the history is in the audit
+of the documents, readable by their readers. `show()` passes the documents known by the host element (document of
+`nuxeo-document-info-bar`, `task.targetDocumentIds` of `nuxeo-document-task`, see `documentHints`); the dialog tries
+them, then `attachedDocumentIds` of the workflow entity, skipping 403/404.
+
+Nuxeo may one day audit the followed transitions itself (a possible improvement of Nuxeo: an event fired on the
+attached documents by `GraphRunner`). The plugin then needs a new version (use Nuxeo's entries, stop recording,
+restrict the target Nuxeo versions); the README has a WARNING about the duplicated entries. Keep reading the
+plugin's own event and keys only until then.
 
 It is the simple sibling of `nuxeo-labs-custom-workflow-graph` (interactive version: details panel, Studio layout,
 legend...). The two packages conflict (`package.xml`). Names never overlap: namespace `NuxeoLabs.WorkflowGraph`
 (`LWG`), files and CSS classes `lwg-*`, i18n keys `labsWorkflowGraph.*`, elements `nuxeo-labs-workflow-graph-*`,
-Java package `nuxeo.labs.workflowgraph`, operation `LabsWorkflowGraph.*`, audited event `lwgWorkflowStepCompleted`
-and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompletedListener`, OSGi components
-`nuxeo.labs.workflowgraph.*`.
+Java package `nuxeo.labs.workflowgraph`, audited event `lwgWorkflowStepCompleted` and its extended info `lwg*`
+(`lwgWorkflowId`, `lwgModelName`, `lwgNodeId`, `lwgTransitions`, `lwgTransitionNames`, `lwgTargets`), listener
+`lwgStepCompletedListener`, OSGi components `nuxeo.labs.workflowgraph.*`. Only exceptions: the Web UI labels of the
+audit entries, `eventType.lwgWorkflowStepCompleted`, `activity.lwgWorkflowStepCompleted` and `eventCategory.Routing`
+(missing in Web UI, used by every routing event), in the plugin's `messages*.json`.
 
 ### Scope (decided with the user, keep it)
 
@@ -54,23 +66,27 @@ and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompleted
   No double-click zoom.
 - Opening (and direction switch): fit; if the fitted zoom is under 50% and a step is current, zoom to 80%
   centered on it.
-- History (2025.2), a "trail" in `--lwg-passed` (default teal `#0d9488`): steps done (`rnode:endDate` set, i.e.
-  completed at least once) get a 2px border (padding 1px less, size unchanged) and a round check badge
-  (`lwg-node-check`, `role="img"`, `labsWorkflowGraph.passedStep`); followed transitions get `is-taken`: color
-  `--lwg-passed` whatever their palette color, stroke 2.4, `TAKEN_ARROW`, label tinted, drawn above the others and
-  below the next ones. **The current look wins**: a current step is never `isPassed`, a transition leaving a
-  current step is never `isTaken` (it is `is-next`). Steps only from the history, no count shown (no "xN"), no
-  guessed path: transitions only come from the recorder. Model: `LWG.normalizeHistory`, `node.isPassed`,
-  `edge.isTaken`, `edge.sourceIndex` (position in the step counting the ignored transitions, matched with the
-  history `index`; a target mismatch is ignored with a warning).
-- Branches not followed (asked by the user, 2025.2), only with a history: dim what was not done **and cannot
-  happen anymore**; the steps still to come (the "future") keep their normal look, the current step and its
-  transitions never change. Future = the current and `waiting` steps plus every step a transition leads to from
-  them, loops included (so a loop back to an early step makes everything after it future). Reached = current,
-  in the history nodes (started), `waiting`, or target of a followed transition. `node.isDimmed` = not reached and
-  not future. `edge.isDimmed` = not next, not taken, and (source dimmed, or source not future and target not
-  reached: never followed, cannot be anymore). Do not dim a transition between two reached steps that was not
-  recorded: it may have been followed before the installation. Workflow done: every step never reached is dimmed.
+- History (2025.2), a "trail" in `--lwg-passed` (default teal `#0d9488`): steps done (an audit entry of the
+  recorder, i.e. completed at least once since the installation) get a 2px border (padding 1px less, size
+  unchanged) and a round check badge (`lwg-node-check`, `role="img"`, `labsWorkflowGraph.passedStep`); followed
+  transitions get `is-taken`: color `--lwg-passed` whatever their palette color, stroke 2.4, `TAKEN_ARROW`, label
+  tinted, drawn above the others and below the next ones. **The current look wins**: a current step is never
+  `isPassed`, a transition leaving a current step is never `isTaken` (it is `is-next`). Steps only from the history,
+  no count shown (no "xN"), no guessed path: transitions only come from the recorder. Model:
+  `LWG.historyFromAudit(entries, workflowId)` (keeps our event for this workflow, counts) -> `LWG.normalizeHistory`
+  format `{ nodes: [{ id, completed, count }], transitions: [{ source, index, name, target, count }] }`,
+  `node.isPassed`, `edge.isTaken`, `edge.sourceIndex` (position in the step counting the ignored transitions,
+  matched with the history `index`; a target mismatch is ignored with a warning).
+- Branches not followed (asked by the user, 2025.2), only with a **complete** history (`model.historyComplete`: a
+  start step is completed in the history or is current; otherwise the workflow started before the installation and
+  its past is unknown: mark what is known, dim nothing): dim what was not done **and cannot happen anymore**; the
+  steps still to come (the "future") keep their normal look, the current step and its transitions never change.
+  Future = the current and `waiting` steps plus every step a transition leads to from them, loops included (so a
+  loop back to an early step makes everything after it future). Reached = current, in the history nodes, `waiting`,
+  or target of a followed transition. `node.isDimmed` = not reached and not future. `edge.isDimmed` = not next, not
+  taken, and (source dimmed, or source not future and target not reached: never followed, cannot be anymore). Do
+  not dim a transition between two reached steps that was not recorded: the recorder may have failed (it never
+  breaks a workflow). Workflow done: every step never reached is dimmed.
   Look: `is-dimmed`, steps `opacity: var(--_lwg-dimmed)` + `grayscale(0.7)` + no shadow, transitions 80% of it,
   labels faded with `color-mix()` but opaque (their line passes below them). `--lwg-dimmed-opacity`, default 0.4.
   Drawing order of the transitions: dimmed, others, taken, next. Samples showing it: parallel (Stop after
@@ -84,26 +100,26 @@ and its extended info `lwgNodeId` / `lwgTransitions`, listener `lwgStepCompleted
   `2025.2.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`. Minimum LTS 2025 hotfix: **2025.16**
   (`nuxeo.target.version`, target platform of `package.xml`): the audit `routes` extension point used by
   `lwg-audit-contrib.xml` exists since 2025.16. Do not lower it, nor go back to the deprecated `event` point.
-- Java bundle (`nuxeo.labs.workflowgraph`):
+- Java bundle (`nuxeo.labs.workflowgraph`), the recorder only:
   - `StepCompletedListener`: synchronous `beforeDocumentModification` listener on `RouteNode` documents. A step
     completes when it is saved with a new `rnode:endDate` (dirty, and different from `PREVIOUS_DOCUMENT_MODEL`):
     the transitions with `result=true` are the followed ones (only the first with
-    `rnode:executeOnlyFirstTransition`, none for an end step). It fires `lwgWorkflowStepCompleted` on the workflow
-    instance (category `Routing`, event properties / extended info `lwgNodeId`, `lwgTransitions` = comma-separated
-    positions, keys prefixed because the OpenSearch audit has one mapping for all extended info; comment abbreviated
-    to `MAX_COMMENT_LENGTH`, the SQL audit column is 1024 characters). It must not break the workflow engine: errors
-    are logged (`log.error`) and swallowed, except when the transaction fails anyway, as in the event service:
-    `ConcurrentUpdateException`, interrupt (`ExceptionUtils.checkInterrupt`), transaction marked rollback-only.
-  - `WorkflowHistoryReader` / `GetWorkflowHistoryOp`: the workflow instance and its attached document ids are read
-    with `CoreInstance.doPrivileged` (needed for the check), then access = administrator, or READ on the workflow
-    instance or on one of its attached documents (checked with the user's session); then the history is read with
-    `CoreInstance.doPrivileged`. 404 (`DocumentNotFoundException`) when the id is not a workflow instance (workflow
-    models, `draft` or `validated`, included), 403 (`DocumentSecurityException`). JSON = the `WorkflowHistory`
-    record. Transitions read from the audit backend (`docUUID` + `eventId`, at most `MAX_AUDIT_ENTRIES`, keep it
-    <= 10000, the default OpenSearch result window); when the audit cannot be read, the steps are still returned,
-    without transitions (error logged, interrupts not swallowed).
-  - Nuxeo does not keep the followed transitions (`result` is reset when the target starts): transitions before
-    the installation are unknown, do not try to guess them.
+    `rnode:executeOnlyFirstTransition`, none for an end step). It fires `lwgWorkflowStepCompleted` on **each
+    attached document** (`GraphRoute.getAttachedDocumentModels()`, deleted ones skipped; nothing without document),
+    category `Routing`, event properties / extended info (`WorkflowHistoryConstants`, built by `properties()`):
+    `lwgWorkflowId`, `lwgModelName` (String), `lwgNodeId` (String), `lwgTransitions` (list of Long positions),
+    `lwgTransitionNames`, `lwgTargets` (lists of String, same order, never null items: the audit drops null list
+    items when reading). Keys prefixed and each key always the same type (one OpenSearch mapping for all extended
+    info). Comment abbreviated to `MAX_COMMENT_LENGTH` (SQL audit column of 1024 characters). It must not break
+    the workflow engine: errors are logged (`log.error`) and swallowed, except when the transaction fails anyway,
+    as in the event service: `ConcurrentUpdateException`, interrupt (`ExceptionUtils.checkInterrupt`), transaction
+    marked rollback-only.
+  - Nuxeo does not keep the followed transitions (`result` is reset when the target starts): what happened before
+    the installation is unknown, do not try to guess it.
+- Dialog (`nuxeo-labs-workflow-graph-dialog.html`): `_loadHistory` (candidates, never rejects, stale openings
+  ignored) and `_readHistory` (`@audit?eventId=...&pageSize=LWG.HISTORY_PAGE_SIZE&sortBy=eventDate&sortOrder=desc`,
+  page by page, at most `LWG.HISTORY_MAX_PAGES`, the oldest entries are dropped with a warning). The audit cannot
+  filter on extended info: the client filters on `lwgWorkflowId`.
 - Web files: `nuxeo-labs-workflow-graph-web/src/main/resources/web/nuxeo.war/ui/nuxeo-labs-workflow-graph/`,
   script order in `nuxeo-labs-workflow-graph-bundle.html`: `lwg-core.js`, `vendor/dagre.min.js`, `lwg-layout.js`,
   `lwg-icons.js`, `lwg-styles.js`, `lwg-renderer.js`, the Polymer dialog, `lwg-override.js`.
@@ -151,17 +167,21 @@ mvn clean install
 mvn -pl nuxeo-labs-workflow-graph-core test -Dnuxeo.test.audit=sql
 ```
 
-Java tests: `WorkflowGraphFeature` (AuditFeature before AutomationFeature, routing deployed without blacklisting
-the routing audit), `AbstractWorkflowHistoryTest` (models built with `RouteNode` documents, steps resumed with
-`resumeInstance` and a button, tasks ended with `endTask`, `recordedSteps` = audit entries per step),
-`TestWorkflowHistory` (paths, loop, fork/merge, waiting merge, several tasks, cancellation, comment length, access,
-invalid ids), `TestWorkflowHistoryWithoutRecorder` (listener disabled by `test-recorder-disabled-contrib.xml`).
+Java tests: `WorkflowGraphFeature` (AuditFeature before AutomationFeature), `AbstractWorkflowHistoryTest` (models
+built with `RouteNode` documents, steps resumed with `resumeInstance` and a button, tasks ended with `endTask`,
+`recorded(docId, workflowId)` = sorted descriptions `step#position(name)>target` of the audit entries of a document),
+`TestWorkflowHistory` (keys and values, JSON of the REST API via `MarshallerHelper`, paths, loop, fork/merge, waiting
+merge, several tasks, cancellation, several attached documents, attached document deleted while running, no
+attached document, comment length, `properties()`), `TestWorkflowHistoryWithoutRecorder` (listener disabled by
+`test-recorder-disabled-contrib.xml`).
 
 Demo: `python3 -m http.server 8765` at the project root, then
 `http://localhost:8765/dev/demo/index.html?wf=large&theme=dark` (`&dir=LR` forces the direction, `&history=off`
 hides the history).
 
 Fixtures: `dev/demo/samples.js` (Serial/Parallel Document Review and MainWF rebuilt from the Nuxeo sources,
-synthetic "contract" and "large" workflows), each with a `history` in the format of the operation (built by
-`history(graph, doneIds, [[source, label]])`). Anonymise any real graph before adding it. The interaction checks
-that test the palette colors use `history: 'off'`.
+synthetic "contract" and "large" workflows), each with `workflowId`, `documentId` and an `audit`: the `@audit`
+entries the recorder would write (built by `audit(graph, doneIds, [[source, label]])`, one entry per step done, plus
+one entry of another workflow that must be ignored); the demo, the Node tests and `screenshots.mjs` use
+`LWG.historyFromAudit(sample.audit, sample.workflowId)`, as the dialog. Anonymise any real graph before adding it.
+The interaction checks that test the palette colors use `history: 'off'`.

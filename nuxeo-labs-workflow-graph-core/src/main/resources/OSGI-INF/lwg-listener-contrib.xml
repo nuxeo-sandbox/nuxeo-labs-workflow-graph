@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 <!--
   Recorder of the transitions followed by graph workflows. Synchronous: it reads the transitions evaluated by the
-  workflow engine while the completed step is saved (rnode:endDate set), before the results are reset.
+  workflow engine while the completed step is saved (rnode:endDate set), before the results are reset, and fires
+  lwgWorkflowStepCompleted on each document attached to the workflow (audited, see lwg-audit-contrib.xml).
 
   @since 2025.2
 -->

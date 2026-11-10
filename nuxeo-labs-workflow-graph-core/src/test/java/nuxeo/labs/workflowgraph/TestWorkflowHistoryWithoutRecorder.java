@@ -18,20 +18,19 @@
  */
 package nuxeo.labs.workflowgraph;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-
-import java.util.List;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.nuxeo.ecm.core.api.IdRef;
+import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
 import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 
 /**
- * A workflow whose steps completed before the package was installed: the steps are known (from their documents), the
- * followed transitions are not.
+ * The recorder disabled as documented in the README (or a workflow run before the package was installed): the
+ * workflow runs, nothing is recorded.
  *
  * @since 2025.2
  */
@@ -41,13 +40,11 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
 public class TestWorkflowHistoryWithoutRecorder extends AbstractWorkflowHistoryTest {
 
     @Test
-    public void testStepsWithoutTransitions() {
+    public void testNothingRecorded() {
         createSimpleModel();
         String id = startWorkflow();
 
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("end:true:1", "start:true:1", "step:true:1"), steps(history));
-        assertTrue(history.transitions().isEmpty());
-        assertTrue(recorderEntries(id).isEmpty());
+        assertTrue(session.getDocument(new IdRef(id)).getAdapter(DocumentRoute.class).isDone());
+        assertTrue(entries(file.getId()).isEmpty());
     }
 }

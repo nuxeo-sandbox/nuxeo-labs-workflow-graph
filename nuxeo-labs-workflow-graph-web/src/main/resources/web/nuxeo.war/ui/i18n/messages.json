@@ -20,5 +20,8 @@
   "labsWorkflowGraph.toolbar.fit": "Fit to screen",
   "labsWorkflowGraph.toolbar.center": "Center on the current step",
   "labsWorkflowGraph.toolbar.direction.TB": "Top to bottom",
-  "labsWorkflowGraph.toolbar.direction.LR": "Left to right"
+  "labsWorkflowGraph.toolbar.direction.LR": "Left to right",
+  "eventType.lwgWorkflowStepCompleted": "Workflow step completed",
+  "activity.lwgWorkflowStepCompleted": "completed a workflow step",
+  "eventCategory.Routing": "Workflow"
 }

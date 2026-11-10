@@ -18,9 +18,9 @@
  */
 
 /**
- * Server side of the Nuxeo Labs Workflow Graph: records the transitions followed by graph workflows
- * ({@link nuxeo.labs.workflowgraph.StepCompletedListener}) and returns the history of a workflow instance
- * ({@link nuxeo.labs.workflowgraph.GetWorkflowHistoryOp}).
+ * Server side of the Nuxeo Labs Workflow Graph: records the transitions followed by graph workflows in the audit of
+ * the documents attached to the workflow ({@link nuxeo.labs.workflowgraph.StepCompletedListener}). The graph dialog
+ * (Web UI) reads them with the REST API ({@code GET /api/v1/id/{docId}/@audit}).
  *
  * @since 2025.2
  */

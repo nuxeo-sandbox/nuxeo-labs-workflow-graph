@@ -21,6 +21,11 @@ package nuxeo.labs.workflowgraph;
 import static java.lang.Boolean.TRUE;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TARGETS_KEY;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_KEY;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITION_NAMES_KEY;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.WORKFLOW_ID_KEY;
+import static org.junit.Assert.assertEquals;
 import static org.nuxeo.audit.api.LogEntryConstants.LOG_DOC_UUID;
 import static org.nuxeo.audit.api.LogEntryConstants.LOG_EVENT_ID;
 import static org.nuxeo.audit.service.AuditComponent.DEFAULT_AUDIT_BACKEND;
@@ -42,9 +47,6 @@ import org.nuxeo.audit.api.LogEntry;
 import org.nuxeo.audit.service.AuditService;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
-import org.nuxeo.ecm.core.api.DocumentRef;
-import org.nuxeo.ecm.core.api.security.ACE;
-import org.nuxeo.ecm.core.api.security.SecurityConstants;
 import org.nuxeo.ecm.core.query.sql.model.Predicates;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoutingService;
@@ -55,7 +57,7 @@ import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
 
 /**
- * Builds workflow models, runs them and reads their history.
+ * Builds workflow models, runs them and reads what the recorder wrote in the audit of the attached documents.
  *
  * @since 2025.2
  */
@@ -124,14 +126,32 @@ public abstract class AbstractWorkflowHistoryTest {
         node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
     }
 
-    /** Validates the model, then creates and starts an instance. Returns its id. */
+    /** Creates the model start -> review (task, button "validate") -> end. */
+    protected void createReviewModel() {
+        node("start", n -> {
+            n.setPropertyValue(GraphNode.PROP_START, TRUE);
+            setTransitions(n, transition("toReview", "review", "true"));
+        });
+        node("review", n -> {
+            n.setPropertyValue(GraphNode.PROP_HAS_TASK, TRUE);
+            setTransitions(n, transition("validate", "end", button("validate")));
+        });
+        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
+    }
+
+    /** Validates the model, then creates and starts an instance attached to the file. Returns its id. */
     protected String startWorkflow() {
+        return startWorkflow(List.of(file.getId()));
+    }
+
+    /** Validates the model, then creates and starts an instance attached to the documents. Returns its id. */
+    protected String startWorkflow(List<String> documentIds) {
         var route = model.getAdapter(DocumentRoute.class);
         if (!route.isValidated()) {
             routing.validateRouteModel(route, session);
         }
         session.save();
-        String id = routing.createNewInstance(MODEL_NAME, List.of(file.getId()), session, true);
+        String id = routing.createNewInstance(MODEL_NAME, documentIds, session, true);
         session.save();
         return id;
     }
@@ -142,57 +162,46 @@ public abstract class AbstractWorkflowHistoryTest {
         session.save();
     }
 
-    /** Reads the history once the audit is written (after the commit). */
-    protected WorkflowHistory history(String workflowId) {
-        txFeature.nextTransaction();
-        return WorkflowHistoryReader.read(session, workflowId);
-    }
-
-    /** Returns the audit entries written by the recorder for the workflow instance. */
-    protected List<LogEntry> recorderEntries(String workflowId) {
+    /** Returns the audit entries written by the recorder on a document, once the audit is written (after commit). */
+    protected List<LogEntry> entries(String docId) {
         txFeature.nextTransaction();
         var backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
-        return backend.queryLogs(new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, workflowId))
+        return backend.queryLogs(new AuditQueryBuilder().predicate(Predicates.eq(LOG_DOC_UUID, docId))
                                                         .and(Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT)));
     }
 
-    /** Returns the steps recorded as completed (one audit entry per completion), sorted, duplicates kept. */
-    protected List<String> recordedSteps(String workflowId) {
-        return recorderEntries(workflowId).stream()
-                                          .map(e -> e.<String> getExtendedValue(NODE_ID_KEY))
-                                          .sorted()
-                                          .toList();
+    /**
+     * Returns the steps recorded as completed on the document for the workflow, one per audit entry (duplicates
+     * kept), sorted, see {@link #describe(LogEntry)}.
+     */
+    protected List<String> recorded(String docId, String workflowId) {
+        return entries(docId).stream()
+                             .filter(e -> workflowId.equals(e.getExtendedValue(WORKFLOW_ID_KEY)))
+                             .map(AbstractWorkflowHistoryTest::describe)
+                             .sorted()
+                             .toList();
+    }
+
+    /**
+     * Describes an audit entry of the recorder as "step#position(name)>target", one "#position(name)>target" per
+     * followed transition, e.g. "start#0(toA)>a#1(toB)>b". An end step is described by its id only.
+     */
+    protected static String describe(LogEntry entry) {
+        List<?> positions = entry.getExtendedValue(TRANSITIONS_KEY);
+        List<?> names = entry.getExtendedValue(TRANSITION_NAMES_KEY);
+        List<?> targets = entry.getExtendedValue(TARGETS_KEY);
+        assertEquals(positions.size(), names.size());
+        assertEquals(positions.size(), targets.size());
+        var description = new StringBuilder(entry.<String> getExtendedValue(NODE_ID_KEY));
+        for (int i = 0; i < positions.size(); i++) {
+            description.append("#%d(%s)>%s".formatted(((Number) positions.get(i)).longValue(), names.get(i),
+                    targets.get(i)));
+        }
+        return description.toString();
     }
 
     /** Returns the open tasks of a step. */
     protected List<Task> openTasks(String workflowId, String nodeId) {
         return Framework.getService(TaskService.class).getAllTaskInstances(workflowId, nodeId, session);
-    }
-
-    /** Grants READ to the user on the document, then commits. */
-    protected void grantRead(DocumentRef ref, String username) {
-        var acp = session.getACP(ref);
-        acp.getOrCreateACL("lwgtest").add(new ACE(username, SecurityConstants.READ, true));
-        session.setACP(ref, acp, true);
-        session.save();
-        txFeature.nextTransaction();
-    }
-
-    /** Returns the steps of the history as sorted "id:completed:starts" strings. */
-    protected static List<String> steps(WorkflowHistory history) {
-        return history.nodes()
-                      .stream()
-                      .map(s -> "%s:%s:%d".formatted(s.id(), s.completed(), s.starts()))
-                      .sorted()
-                      .toList();
-    }
-
-    /** Returns the followed transitions of the history as sorted "source#index>target(name)=count" strings. */
-    protected static List<String> transitions(WorkflowHistory history) {
-        return history.transitions()
-                      .stream()
-                      .map(t -> "%s#%d>%s(%s)=%d".formatted(t.source(), t.index(), t.target(), t.name(), t.count()))
-                      .sorted()
-                      .toList();
     }
 }

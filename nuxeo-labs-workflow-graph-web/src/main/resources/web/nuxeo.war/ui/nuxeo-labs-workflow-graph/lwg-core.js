@@ -20,8 +20,8 @@
 /*
  * Core of the workflow graph: namespace, directions (and the memory of the user's choice), translations, text
  * measuring and the conversion of the REST graph (GET /api/v1/workflow/{id}/graph) and of the history of the
- * workflow (LabsWorkflowGraph.GetHistory operation, @since 2025.2) into the model used by the layout and the
- * renderer.
+ * workflow (audit entries of an attached document written by the recorder of the plugin, @since 2025.2) into the
+ * model used by the layout and the renderer.
  *
  * No dependency on Polymer or on the DOM (the DOM is only used, when present, to measure text), so the
  * file can be unit tested with Node.
@@ -429,13 +429,37 @@
 
   /* ==================== History ==================== */
 
+  // Audited event of the recorder (server side of the plugin), fired on each document attached to the workflow.
+  LWG.HISTORY_EVENT = 'lwgWorkflowStepCompleted';
+  // Audit entries read per request (maximum page size of the audit page provider), and maximum number of pages.
+  LWG.HISTORY_PAGE_SIZE = 1000;
+  LWG.HISTORY_MAX_PAGES = 10;
+
+  const hasValue = (v) => v !== undefined && v !== null && v !== '';
+
+  // Position of a transition in its step: a non-negative integer (or its string), null otherwise.
+  function toIndex(value) {
+    if (typeof value === 'number') {
+      return Number.isInteger(value) && value >= 0 ? value : null;
+    }
+    return typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value.trim()) : null;
+  }
+
+  // An audit extended info holding a list: an array, or a comma-separated string.
+  function toList(value) {
+    if (Array.isArray(value)) {
+      return value;
+    }
+    return typeof value === 'string' && value.trim() ? value.split(',').map((s) => s.trim()) : [];
+  }
+
   /*
-   * Checks and cleans the history of a workflow instance: the JSON returned by the LabsWorkflowGraph.GetHistory
-   * operation (server side of the plugin), as an object or a JSON string:
-   *   { workflowId, nodes: [{ id, completed, starts }], transitions: [{ source, index, name, target, count }] }
-   * nodes: the steps that started at least once (completed: they completed at least once). transitions: the
-   * transitions followed at least once, index being their position in their step (definition order, the order of
-   * the graph endpoint).
+   * Checks and cleans the history of a workflow instance, as built by LWG.historyFromAudit, as an object or a JSON
+   * string:
+   *   { nodes: [{ id, completed, count }], transitions: [{ source, index, name, target, count }] }
+   * nodes: the steps completed at least once (count: number of times). transitions: the transitions followed at
+   * least once, index being their position in their step (definition order, the order of the graph endpoint),
+   * target the id of their target step (null when unknown).
    * Returns { nodes, transitions } with the valid entries only, null when the value is not a history.
    *
    * @since 2025.2
@@ -452,10 +476,9 @@
     if (!data || typeof data !== 'object' || !Array.isArray(data.nodes) || !Array.isArray(data.transitions)) {
       return null;
     }
-    const hasValue = (v) => v !== undefined && v !== null && v !== '';
     const nodes = data.nodes
       .filter((n) => n && hasValue(n.id))
-      .map((n) => ({ id: String(n.id), completed: n.completed === true, starts: toNumber(n.starts) }));
+      .map((n) => ({ id: String(n.id), completed: n.completed === true, count: toNumber(n.count) }));
     const transitions = data.transitions
       .filter((t) => t && hasValue(t.source) && Number.isInteger(t.index) && t.index >= 0)
       .map((t) => ({
@@ -465,6 +488,94 @@
         count: toNumber(t.count),
       }));
     return { nodes, transitions };
+  };
+
+  /*
+   * Builds the history of a workflow instance from the audit entries of one of its attached documents (the "entries"
+   * of GET /api/v1/id/{docId}/@audit, in any order). The recorder of the plugin writes one entry per completed step
+   * on each attached document: event LWG.HISTORY_EVENT, extended info lwgWorkflowId (id of the workflow instance),
+   * lwgNodeId (id of the step), lwgTransitions (positions of the followed transitions in the step), lwgTransitionNames
+   * and lwgTargets (their names and target steps, same order). Only the entries of this event for this workflow are
+   * kept, invalid values are ignored.
+   * Returns the format of LWG.normalizeHistory: the steps completed at least once, the transitions followed at least
+   * once (in the order they were first followed), with their counts.
+   *
+   * @since 2025.2
+   */
+  LWG.historyFromAudit = function (entries, workflowId) {
+    const nodes = new Map();
+    const transitions = new Map();
+    if (!hasValue(workflowId) || !Array.isArray(entries)) {
+      return { nodes: [], transitions: [] };
+    }
+    const time = (e) => {
+      const t = Date.parse(e.eventDate);
+      return Number.isFinite(t) ? t : 0;
+    };
+    entries
+      .filter(
+        (e) =>
+          e &&
+          e.eventId === LWG.HISTORY_EVENT &&
+          e.extended &&
+          String(e.extended.lwgWorkflowId) === String(workflowId) &&
+          hasValue(e.extended.lwgNodeId),
+      )
+      .sort((a, b) => time(a) - time(b) || toNumber(a.id) - toNumber(b.id))
+      .forEach((e) => {
+        const ext = e.extended;
+        const source = String(ext.lwgNodeId);
+        nodes.set(source, (nodes.get(source) || 0) + 1);
+        const names = toList(ext.lwgTransitionNames);
+        const targets = toList(ext.lwgTargets);
+        toList(ext.lwgTransitions).forEach((position, i) => {
+          const index = toIndex(position);
+          if (index === null) {
+            return;
+          }
+          const key = historyKey(source, index);
+          const known = transitions.get(key);
+          if (known) {
+            known.count += 1;
+            return;
+          }
+          transitions.set(key, {
+            source,
+            index,
+            name: hasValue(names[i]) ? String(names[i]) : null,
+            target: hasValue(targets[i]) ? String(targets[i]) : null,
+            count: 1,
+          });
+        });
+      });
+    return {
+      nodes: Array.from(nodes, ([id, count]) => ({ id, completed: true, count })),
+      transitions: Array.from(transitions.values()),
+    };
+  };
+
+  /*
+   * Returns the ids of the documents found in the values, in order and without duplicates: ids (strings), document
+   * entities ({ uid }), references ({ id }, as in attachedDocumentIds of GET /api/v1/workflow/{id}), or arrays of
+   * them. Used to find a document attached to the workflow whose audit can be read.
+   *
+   * @since 2025.2
+   */
+  LWG.documentIdsOf = function (...values) {
+    const ids = [];
+    const add = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach(add);
+        return;
+      }
+      const raw = value && typeof value === 'object' ? value.uid || value.id : value;
+      const id = typeof raw === 'string' ? raw.trim() : '';
+      if (id && !ids.includes(id)) {
+        ids.push(id);
+      }
+    };
+    values.forEach(add);
+    return ids;
   };
 
   function historyKey(source, index) {
@@ -494,7 +605,7 @@
    *             studio: { x, y }, index }],
    *   edges: [{ id, source, target, label, labelText, labelTruncated, labelWidth, labelHeight, isSelfLoop,
    *             isNext, isTaken, isDimmed, colorIndex, sourceIndex, index }],
-   *   currentNodeIds: [ids], hasHistory: boolean, warnings: [strings]
+   *   currentNodeIds: [ids], hasHistory: boolean, historyComplete: boolean, warnings: [strings]
    * }
    * A node is current when its state is "suspended" (waiting for its tasks). isNext marks the transitions
    * leaving a current node. Nodes are sorted by their Studio position (top to bottom, then left to right) so
@@ -505,15 +616,18 @@
    * step is never taken. sourceIndex is the position of the transition in its step (definition order, the ignored
    * transitions included), used to match the history; a followed transition whose target differs from the graph
    * is ignored with a warning.
-   * isDimmed marks the branches not followed: what was not done and cannot happen anymore. A step is dimmed when
-   * it was never reached (not current, not waiting (merge), not in the history (never started), not the target of
-   * a followed transition) and cannot be reached anymore (no transition leads to it from a current or a waiting
-   * step, loops included): the steps still to come keep their look. A transition is dimmed when it is not next nor
-   * followed and its source is dimmed, or its source cannot be reached anymore and its target was never reached
-   * (so it was never followed). A transition between two reached steps that was not recorded is not dimmed: it may
-   * have been followed before the transitions were recorded. When the workflow is done (no current step), every
-   * step never reached is dimmed. Without a history, nothing is dimmed. The steps come from their documents, so
-   * the dimming also works for the workflows started before the transitions were recorded.
+   * The history is complete (historyComplete) when it covers the whole run: a start step is completed in the
+   * history, or is current. Otherwise the workflow started before the transitions were recorded (installation of
+   * the plugin): what happened before is unknown, so the steps done and the transitions followed since are marked
+   * but nothing is dimmed.
+   * isDimmed (complete history only) marks the branches not followed: what was not done and cannot happen anymore.
+   * A step is dimmed when it was never reached (not current, not waiting (merge), not in the history, not the
+   * target of a followed transition) and cannot be reached anymore (no transition leads to it from a current or a
+   * waiting step, loops included): the steps still to come keep their look. A transition is dimmed when it is not
+   * next nor followed and its source is dimmed, or its source cannot be reached anymore and its target was never
+   * reached (so it was never followed). A transition between two reached steps that was not recorded is not
+   * dimmed: the recorder may have failed to record it (it never breaks a workflow). When the workflow is done (no
+   * current step), every step never reached is dimmed. Without a history, nothing is dimmed.
    *
    * colorIndex tells the transitions leaving the same step apart, as Web UI's default graph does: 0 when the
    * step has a single transition (neutral color), otherwise 1 to TRANSITION_COLOR_COUNT from the rank of the
@@ -534,7 +648,7 @@
       warnings.push('Invalid workflow history, ignored');
     }
     const completed = new Set(history ? history.nodes.filter((n) => n.completed).map((n) => n.id) : []);
-    // started at least once (the history lists the steps started or completed)
+    // in the history (completed, or started for a history listing the steps started)
     const started = new Set(history ? history.nodes.map((n) => n.id) : []);
     // merge steps waiting for other branches, and targets of followed transitions: reached as well
     const waiting = new Set();
@@ -628,7 +742,10 @@
     if (followed.size) {
       warnings.push(`History: ${followed.size} followed transition(s) not found in the graph, ignored`);
     }
-    if (history) {
+    // the run is fully recorded when a start step completed (recorded) or is current (nothing happened before)
+    const historyComplete =
+      !!history && nodes.some((n) => n.kind === 'start' && (n.isCurrent || completed.has(n.id)));
+    if (historyComplete) {
       // the steps that can still happen: the current ones, the merges waiting for other branches, and every step a
       // transition leads to from them (loops included)
       const future = new Set(nodes.filter((n) => n.isCurrent || waiting.has(n.id)).map((n) => n.id));
@@ -658,6 +775,7 @@
       edges,
       currentNodeIds: nodes.filter((n) => n.isCurrent).map((n) => n.id),
       hasHistory: !!history,
+      historyComplete,
       warnings,
     };
   };

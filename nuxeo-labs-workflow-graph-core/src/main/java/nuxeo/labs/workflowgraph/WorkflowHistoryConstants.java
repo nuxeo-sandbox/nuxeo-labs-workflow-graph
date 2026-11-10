@@ -19,30 +19,48 @@
 package nuxeo.labs.workflowgraph;
 
 /**
- * Names shared by the recorder ({@link StepCompletedListener}) and the history reader
- * ({@link WorkflowHistoryReader}). They are also used in {@code OSGI-INF/lwg-audit-contrib.xml}.
+ * Names of the event fired by the recorder ({@link StepCompletedListener}) and of its properties. They are also used
+ * in {@code OSGI-INF/lwg-audit-contrib.xml}, and read by the graph dialog (Web UI) from the audit of the documents
+ * attached to the workflow ({@code GET /api/v1/id/{docId}/@audit}).
  * <p>
- * The audit extended info keys are prefixed: in the OpenSearch audit backend, the extended info of every event share
- * one mapping ({@code extended.<key>}), so a generic name could clash with the key of another add-on.
+ * The event properties are stored as audit extended info under the same keys. They are prefixed: in the OpenSearch
+ * audit backend, the extended info of every event share one mapping ({@code extended.<key>}), so a generic name
+ * could clash with the key of another add-on, or of Nuxeo itself. Each key always holds the same type.
  *
  * @since 2025.2
  */
 public final class WorkflowHistoryConstants {
 
-    /** Event fired on the workflow instance, and audited, each time one of its steps completes. */
+    /** Event fired on each document attached to the workflow, and audited, each time a step completes. */
     public static final String STEP_COMPLETED_EVENT = "lwgWorkflowStepCompleted";
 
-    /** Event property and audit extended info: id of the completed step ({@code rnode:nodeId}). */
+    /** Event property and audit extended info (String): id of the workflow instance. */
+    public static final String WORKFLOW_ID_KEY = "lwgWorkflowId";
+
+    /** Event property and audit extended info (String): name of the workflow model, e.g. "SerialDocumentReview". */
+    public static final String MODEL_NAME_KEY = "lwgModelName";
+
+    /** Event property and audit extended info (String): id of the completed step ({@code rnode:nodeId}). */
     public static final String NODE_ID_KEY = "lwgNodeId";
 
     /**
-     * Event property and audit extended info: positions of the transitions followed when the step completed, in
-     * the definition order of the step ({@code rnode:transitions}), comma separated. Empty for an end step.
+     * Event property and audit extended info (list of Long): positions of the transitions followed when the step
+     * completed, in the definition order of the step ({@code rnode:transitions}), the order of the graph endpoint.
+     * Empty for an end step.
      */
     public static final String TRANSITIONS_KEY = "lwgTransitions";
 
-    /** Separator of the positions in {@link #TRANSITIONS_KEY}. */
-    public static final String TRANSITIONS_SEPARATOR = ",";
+    /**
+     * Event property and audit extended info (list of String): names of the followed transitions
+     * ({@code rnode:transitions/*}/name), in the order of {@link #TRANSITIONS_KEY}.
+     */
+    public static final String TRANSITION_NAMES_KEY = "lwgTransitionNames";
+
+    /**
+     * Event property and audit extended info (list of String): ids of the target steps of the followed transitions,
+     * in the order of {@link #TRANSITIONS_KEY}.
+     */
+    public static final String TARGETS_KEY = "lwgTargets";
 
     private WorkflowHistoryConstants() {
         // constants only

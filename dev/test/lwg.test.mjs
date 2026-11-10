@@ -77,14 +77,24 @@ test('t: Web UI bundle first, English fallback, never a raw key of the plugin', 
   assert.equal(L.t('labsWorkflowGraph.toolbar.zoomIn'), 'Zoom in');
 });
 
-test('every fallback message is in both translation files, and the reverse', () => {
+// Labels of the audit entries of the recorder, used by Web UI (History tab, Activity sidebar), not by the plugin
+const AUDIT_LABEL_KEYS = [
+  'activity.lwgWorkflowStepCompleted',
+  'eventCategory.Routing',
+  'eventType.lwgWorkflowStepCompleted',
+];
+
+test('every fallback message is in both translation files, and the reverse (plus the audit labels)', () => {
   const i18nDir = path.join(webDir, '..', 'i18n');
   const en = JSON.parse(fs.readFileSync(path.join(i18nDir, 'messages.json'), 'utf8'));
   const fr = JSON.parse(fs.readFileSync(path.join(i18nDir, 'messages-fr.json'), 'utf8'));
-  const keys = Object.keys(LWG.FALLBACK_MESSAGES).sort();
+  const keys = Object.keys(LWG.FALLBACK_MESSAGES).concat(AUDIT_LABEL_KEYS).sort();
   assert.deepEqual(Object.keys(en).sort(), keys);
   assert.deepEqual(Object.keys(fr).sort(), keys);
-  keys.forEach((k) => assert.equal(en[k], LWG.FALLBACK_MESSAGES[k], k));
+  Object.keys(LWG.FALLBACK_MESSAGES).forEach((k) => assert.equal(en[k], LWG.FALLBACK_MESSAGES[k], k));
+  AUDIT_LABEL_KEYS.forEach((k) => assert.ok(en[k] && fr[k], k));
+  // the event of the labels is the one read by the dialog
+  assert.ok(AUDIT_LABEL_KEYS.includes(`eventType.${LWG.HISTORY_EVENT}`));
 });
 
 test('translateLabel: client translation, readable snake_case keys, empty values', () => {
@@ -163,10 +173,13 @@ test('buildModel: transition colors by rank in their step, neutral when the step
 
 /* ==================== History ==================== */
 
+// History of a sample, as the dialog builds it from the audit entries of an attached document
+const historyOf = (sample) => LWG.historyFromAudit(sample.audit, sample.workflowId);
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
 test('normalizeHistory: object or JSON string, invalid entries dropped, null when not a history', () => {
   const raw = {
-    workflowId: 'w',
-    nodes: [{ id: 'a', completed: true, starts: 2 }, { id: 'b', completed: false, starts: 1 }, { completed: true }],
+    nodes: [{ id: 'a', completed: true, count: 2 }, { id: 'b', completed: false }, { completed: true }],
     transitions: [
       { source: 'a', index: 1, name: 'x', target: 'b', count: 3 },
       { source: 'a', index: -1, target: 'b' },
@@ -176,28 +189,119 @@ test('normalizeHistory: object or JSON string, invalid entries dropped, null whe
     ],
   };
   const h = LWG.normalizeHistory(raw);
-  assert.deepEqual(JSON.parse(JSON.stringify(h)), {
+  assert.deepEqual(plain(h), {
     nodes: [
-      { id: 'a', completed: true, starts: 2 },
-      { id: 'b', completed: false, starts: 1 },
+      { id: 'a', completed: true, count: 2 },
+      { id: 'b', completed: false, count: 0 },
     ],
     transitions: [
       { source: 'a', index: 1, target: 'b', count: 3 },
       { source: 'b', index: 0, target: null, count: 0 },
     ],
   });
-  const plain = (v) => JSON.parse(JSON.stringify(v));
   assert.deepEqual(plain(LWG.normalizeHistory(JSON.stringify(raw))), plain(h));
   for (const invalid of [null, undefined, '', 'not json', 42, {}, { nodes: [] }, { nodes: {}, transitions: [] }]) {
     assert.equal(LWG.normalizeHistory(invalid), null, String(invalid));
   }
 });
 
+test('historyFromAudit: entries of the event for the workflow only, counts, invalid values ignored', () => {
+  const entry = (id, date, extended, eventId) => ({
+    id,
+    eventId: eventId || LWG.HISTORY_EVENT,
+    eventDate: date,
+    extended: Object.assign({ lwgWorkflowId: 'wf' }, extended),
+  });
+  const entries = [
+    // most recent first, as read by the dialog
+    entry(4, '2026-01-05T09:04:00.000Z', {
+      lwgNodeId: 'review',
+      lwgTransitions: [1],
+      lwgTransitionNames: ['validate'],
+      lwgTargets: ['end'],
+    }),
+    entry(3, '2026-01-05T09:03:00.000Z', {
+      lwgNodeId: 'review',
+      lwgTransitions: [0],
+      lwgTransitionNames: ['reject'],
+      lwgTargets: ['review'],
+    }),
+    entry(2, '2026-01-05T09:02:00.000Z', {
+      lwgNodeId: 'review',
+      lwgTransitions: ['0'],
+      lwgTransitionNames: ['reject'],
+      lwgTargets: ['review'],
+    }),
+    // a fork: both transitions, positions as a comma-separated string, target unknown
+    entry(1, '2026-01-05T09:01:00.000Z', { lwgNodeId: 'start', lwgTransitions: '0, 1', lwgTargets: ['a', ''] }),
+    // an end step
+    entry(5, '2026-01-05T09:05:00.000Z', { lwgNodeId: 'end', lwgTransitions: [] }),
+    // ignored: another workflow, another event, no step, invalid positions
+    entry(6, '2026-01-05T09:06:00.000Z', { lwgWorkflowId: 'other', lwgNodeId: 'x', lwgTransitions: [0] }),
+    entry(7, '2026-01-05T09:07:00.000Z', { lwgNodeId: 'y', lwgTransitions: [0] }, 'documentModified'),
+    entry(8, '2026-01-05T09:08:00.000Z', { lwgNodeId: '', lwgTransitions: [0] }),
+    entry(9, '2026-01-05T09:09:00.000Z', { lwgNodeId: 'bad', lwgTransitions: [-1, 1.5, 'x', null] }),
+    null,
+    { eventId: LWG.HISTORY_EVENT },
+  ];
+  assert.deepEqual(plain(LWG.historyFromAudit(entries, 'wf')), {
+    nodes: [
+      { id: 'start', completed: true, count: 1 },
+      { id: 'review', completed: true, count: 3 },
+      { id: 'end', completed: true, count: 1 },
+      { id: 'bad', completed: true, count: 1 },
+    ],
+    transitions: [
+      { source: 'start', index: 0, name: null, target: 'a', count: 1 },
+      { source: 'start', index: 1, name: null, target: null, count: 1 },
+      { source: 'review', index: 0, name: 'reject', target: 'review', count: 2 },
+      { source: 'review', index: 1, name: 'validate', target: 'end', count: 1 },
+    ],
+  });
+  // usable by normalizeHistory and buildModel
+  assert.ok(LWG.normalizeHistory(LWG.historyFromAudit(entries, 'wf')));
+  for (const [list, id] of [[entries, null], [entries, ''], [null, 'wf'], ['not a list', 'wf'], [[], 'wf']]) {
+    assert.deepEqual(plain(LWG.historyFromAudit(list, id)), { nodes: [], transitions: [] });
+  }
+});
+
+test('documentIdsOf: ids, documents and references, in order, without duplicates', () => {
+  const ids = LWG.documentIdsOf(
+    { 'entity-type': 'document', uid: 'doc1' },
+    [{ id: 'doc2' }, { uid: 'doc1' }, ' doc3 '],
+    [[{ id: 'doc4' }]],
+    null,
+    undefined,
+    '',
+    42,
+    { id: 7 },
+    {},
+  );
+  assert.deepEqual(plain(ids), ['doc1', 'doc2', 'doc3', 'doc4']);
+  assert.deepEqual(plain(LWG.documentIdsOf()), []);
+});
+
+test('samples: the audit entries of another workflow are ignored', () => {
+  for (const [name, sample] of Object.entries(samples)) {
+    const others = sample.audit.filter((e) => e.extended.lwgWorkflowId !== sample.workflowId);
+    assert.equal(others.length, 1, name);
+    const history = historyOf(sample);
+    const [other] = others;
+    assert.ok(
+      !history.transitions.some(
+        (t) => t.source === other.extended.lwgNodeId && t.index === other.extended.lwgTransitions[0],
+      ),
+      name,
+    );
+  }
+});
+
 test('buildModel with a history: steps done, transitions followed, the current look wins', () => {
   // serial: Start and Choose Participants done, Validate (current) done once; the self-loop "Rejection" it followed
   // leaves the current step: shown as next, not as followed
-  const model = LWG.buildModel(samples.serial.graph, { history: samples.serial.history });
+  const model = LWG.buildModel(samples.serial.graph, { history: historyOf(samples.serial) });
   assert.equal(model.hasHistory, true);
+  assert.equal(model.historyComplete, true);
   assert.equal(model.warnings.length, 0);
   const passed = Array.from(model.nodes.filter((n) => n.isPassed).map((n) => n.id)).sort();
   assert.deepEqual(passed, ['Task375f', 'Task38e']);
@@ -213,14 +317,16 @@ test('buildModel with a history: steps done, transitions followed, the current l
   );
 
   // without a history, nothing is done or followed
-  const plain = LWG.buildModel(samples.serial.graph);
-  assert.equal(plain.hasHistory, false);
-  assert.ok(plain.nodes.every((n) => !n.isPassed) && plain.edges.every((e) => !e.isTaken));
+  const none = LWG.buildModel(samples.serial.graph);
+  assert.equal(none.hasHistory, false);
+  assert.equal(none.historyComplete, false);
+  assert.ok(none.nodes.every((n) => !n.isPassed) && none.edges.every((e) => !e.isTaken));
 
-  // every sample history matches its graph
+  // every sample history matches its graph, and is complete (the start step is done)
   for (const [name, sample] of Object.entries(samples)) {
-    const m = LWG.buildModel(sample.graph, { history: sample.history });
+    const m = LWG.buildModel(sample.graph, { history: historyOf(sample) });
     assert.equal(m.warnings.length, 0, `${name}: ${m.warnings}`);
+    assert.equal(m.historyComplete, true, name);
     assert.ok(m.nodes.some((n) => n.isPassed) && m.edges.some((e) => e.isTaken), name);
   }
 });
@@ -239,7 +345,7 @@ function futureOf(model) {
 test('buildModel with a history: branches not followed are dimmed, the steps still to come are not', () => {
   const ids = (list) => Array.from(list.map((x) => x.id)).sort();
   const dimmedEdges = (m) => Array.from(m.edges.filter((e) => e.isDimmed).map((e) => `${e.source}>${e.target}`));
-  const build = (name) => LWG.buildModel(samples[name].graph, { history: samples[name].history });
+  const build = (name) => LWG.buildModel(samples[name].graph, { history: historyOf(samples[name]) });
 
   // serial: Update the Document and Stop can still happen (from the current step): not dimmed. Choose Participants
   // will not run again, its "Cancelation" to Stop was not followed: dimmed, even if Stop is not
@@ -261,15 +367,15 @@ test('buildModel with a history: branches not followed are dimmed, the steps sti
   // contract: "Changes requested" loops back to the preparation, from which every step can happen again
   const contract = build('contract');
   assert.equal(contract.nodes.filter((n) => n.isDimmed).length + contract.edges.filter((e) => e.isDimmed).length, 0);
-  // a transition between two steps reached, never followed ("Approved"), is not dimmed: it may have been followed
-  // before the transitions were recorded
+  // a transition between two steps reached, never followed ("Approved"), is not dimmed: the recorder may have failed
+  // to record it
   const approved = contract.edges.find((e) => e.label === 'Approved');
   assert.equal(approved.isTaken || approved.isDimmed, false);
 
   // every sample: a dimmed step is never current, passed, the target of a followed transition or still to come;
   // a dimmed transition is never next nor followed, and cannot be followed anymore
   for (const [name, sample] of Object.entries(samples)) {
-    const m = LWG.buildModel(sample.graph, { history: sample.history });
+    const m = LWG.buildModel(sample.graph, { history: historyOf(sample) });
     const byId = new Map(m.nodes.map((n) => [n.id, n]));
     const future = futureOf(m);
     m.nodes
@@ -280,15 +386,15 @@ test('buildModel with a history: branches not followed are dimmed, the steps sti
       .filter((e) => e.isDimmed)
       .forEach((e) => assert.ok(!e.isNext && !e.isTaken && !future.has(e.source), `${name}: ${e.id}`));
     // without a history, nothing is dimmed
-    const plain = LWG.buildModel(sample.graph);
-    assert.ok(plain.nodes.every((n) => !n.isDimmed) && plain.edges.every((e) => !e.isDimmed), name);
+    const none = LWG.buildModel(sample.graph);
+    assert.ok(none.nodes.every((n) => !n.isDimmed) && none.edges.every((e) => !e.isDimmed), name);
   }
 });
 
 test('buildModel with a history: dimmed = never reached (current, started, waiting, followed) and not to come', () => {
   const graph = {
     nodes: [
-      { id: 'start', state: 'ready' },
+      { id: 'start', state: 'ready', isStartNode: true },
       { id: 'a', state: 'ready' },
       { id: 'current', state: 'suspended' },
       { id: 'next', state: 'ready' },
@@ -313,11 +419,11 @@ test('buildModel with a history: dimmed = never reached (current, started, waiti
     ],
   };
   const history = {
-    // "started": started but not completed (e.g. canceled by a merge)
+    // "started": listed but not completed (a history may list the steps started): reached
     nodes: [
-      { id: 'start', completed: true, starts: 1 },
-      { id: 'a', completed: true, starts: 1 },
-      { id: 'started', completed: false, starts: 1 },
+      { id: 'start', completed: true },
+      { id: 'a', completed: true },
+      { id: 'started', completed: false },
     ],
     transitions: [
       { source: 'start', index: 0, target: 'a' },
@@ -356,6 +462,40 @@ test('buildModel with a history: dimmed = never reached (current, started, waiti
       'to come',
     ],
   });
+});
+
+test('buildModel with a history: incomplete (start step not recorded) marks what is known, dims nothing', () => {
+  // serial: the workflow started before the installation, only the rejection of the current step was recorded
+  const graph = samples.serial.graph;
+  const entries = samples.serial.audit.filter((e) => e.extended.lwgNodeId === 'Task6d8');
+  const partial = LWG.buildModel(graph, { history: LWG.historyFromAudit(entries, samples.serial.workflowId) });
+  assert.equal(partial.hasHistory, true);
+  assert.equal(partial.historyComplete, false);
+  assert.ok(partial.nodes.every((n) => !n.isDimmed) && partial.edges.every((e) => !e.isDimmed));
+  // nothing else is known: Start and Choose Participants are not marked done
+  assert.deepEqual(Array.from(partial.nodes.filter((n) => n.isPassed)), []);
+
+  // no entry at all (the audit of the document was read): same
+  const empty = LWG.buildModel(graph, { history: LWG.historyFromAudit([], samples.serial.workflowId) });
+  assert.equal(empty.historyComplete, false);
+  assert.ok(empty.nodes.every((n) => !n.isDimmed && !n.isPassed) && empty.edges.every((e) => !e.isDimmed));
+
+  // the start step is current: nothing happened before it, the history is complete
+  const atStart = {
+    nodes: [
+      { id: 's', state: 'suspended', isStartNode: true },
+      { id: 'x', state: 'ready' },
+      { id: 'y', state: 'ready', isEndNode: true },
+    ],
+    transitions: [
+      { nodeSourceId: 's', nodeTargetId: 'x', label: 'go' },
+      { nodeSourceId: 'x', nodeTargetId: 'y', label: 'end' },
+    ],
+  };
+  const fresh = LWG.buildModel(atStart, { history: LWG.historyFromAudit([], 'w') });
+  assert.equal(fresh.historyComplete, true);
+  // everything can still happen
+  assert.ok(fresh.nodes.every((n) => !n.isDimmed) && fresh.edges.every((e) => !e.isDimmed));
 });
 
 test('buildModel with a history: matched by position in the step, wrong targets and unknown entries ignored', () => {

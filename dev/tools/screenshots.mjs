@@ -20,7 +20,8 @@
 /*
  * Renders the demo (dev/demo/index.html) in headless Chrome for every sample and theme, fails on any console
  * error or warning, writes the screenshots to dev/out/demo/, then checks the view interactions (initial view,
- * keys, toolbar, wheel, drag, no animation, read-only steps) and the history (steps done, transitions followed).
+ * keys, toolbar, wheel, drag, no animation, read-only steps) and the history (steps done, transitions followed, built
+ * from the audit entries of the samples as the dialog does).
  *     LWG_NODE_MODULES=... CHROME_PATH=... node dev/tools/screenshots.mjs [filter]
  * The optional filter keeps the cases whose name contains it (e.g. "serial-default"); "checks" runs the
  * interaction checks only.
@@ -492,10 +493,11 @@ async function checkHistory() {
   const large = await open({ query: { wf: 'large', theme: 'default' } });
   const counts = await large.page.evaluate(() => {
     const s = window.LWG_SAMPLES.large;
+    const h = window.NuxeoLabs.WorkflowGraph.historyFromAudit(s.audit, s.workflowId);
     const current = s.graph.nodes.filter((n) => n.state === 'suspended').map((n) => n.id);
     return {
-      expectedPassed: s.history.nodes.filter((n) => n.completed && !current.includes(n.id)).length,
-      expectedTaken: s.history.transitions.filter((t) => !current.includes(t.source)).length,
+      expectedPassed: h.nodes.filter((n) => n.completed && !current.includes(n.id)).length,
+      expectedTaken: h.transitions.filter((t) => !current.includes(t.source)).length,
       passed: document.querySelectorAll('.lwg-node.is-passed').length,
       taken: document.querySelectorAll('.lwg-edge.is-taken').length,
       dimmed: Array.from(document.querySelectorAll('.lwg-node.is-dimmed')).map((n) => n.dataset.id).join(),

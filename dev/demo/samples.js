@@ -27,11 +27,15 @@
  * Node titles and transition labels are already translated, as the server does with its messages bundle
  * (untranslated keys such as "automatic_transition" are returned as is).
  *
- * Each sample also has a history, as returned by the LabsWorkflowGraph.GetHistory operation (steps already done,
- * transitions already followed), shown by the demo unless "history=off".
+ * Each sample also has an audit: the entries written by the recorder of the plugin on an attached document, as
+ * returned by GET /api/v1/id/{docId}/@audit (steps already done, transitions already followed), plus one entry of
+ * another workflow (ignored). The demo shows the history built from it (LWG.historyFromAudit) unless "history=off".
  */
 (function (root) {
   'use strict';
+
+  const WORKFLOW_ID = 'demo-workflow';
+  const DOCUMENT_ID = 'demo-document';
 
   function node(id, title, x, y, state, extra) {
     return Object.assign(
@@ -57,25 +61,62 @@
   }
 
   /*
-   * History of a sample, in the format of the LabsWorkflowGraph.GetHistory operation. done: ids of the steps
-   * completed at least once; followed: [source, label] of the transitions followed at least once (index is their
-   * position in the source, as counted by the server). The current steps are listed as started.
+   * Audit entries of a sample, in the format of GET /api/v1/id/{docId}/@audit (the "entries"): one entry per step
+   * done, in order, with the transitions it followed. done: ids of the steps completed at least once; followed:
+   * [source, label] of the transitions followed at least once (their position in the source is counted as the
+   * server does, their name is made up: the graph endpoint does not return it).
    */
-  function history(graph, done, followed) {
-    const current = graph.nodes.filter((n) => n.state === 'suspended').map((n) => n.id);
-    const nodes = done.map((id) => ({ id, completed: true, starts: current.includes(id) ? 2 : 1 }));
-    current
-      .filter((id) => !done.includes(id))
-      .forEach((id) => nodes.push({ id, completed: false, starts: 1 }));
-    const transitions = followed.map(([source, label]) => {
-      const fromSource = graph.transitions.filter((t) => t.nodeSourceId === source);
-      const index = fromSource.findIndex((t) => t.label === label);
-      if (index < 0) {
+  function audit(graph, done, followed) {
+    followed.forEach(([source, label]) => {
+      if (!graph.transitions.some((t) => t.nodeSourceId === source && t.label === label)) {
         throw new Error(`No transition "${label}" from ${source}`);
       }
-      return { source, index, name: `${source}-${index}`, target: fromSource[index].nodeTargetId, count: 1 };
     });
-    return { workflowId: 'demo', nodes, transitions };
+    const entry = (i, workflowId, nodeId, positions) => {
+      const fromSource = graph.transitions.filter((t) => t.nodeSourceId === nodeId);
+      return {
+        'entity-type': 'logEntry',
+        id: i + 1,
+        category: 'Routing',
+        principalName: 'demo',
+        comment: nodeId,
+        docUUID: DOCUMENT_ID,
+        eventId: 'lwgWorkflowStepCompleted',
+        repositoryId: 'default',
+        eventDate: new Date(Date.UTC(2026, 0, 5, 9, i)).toISOString(),
+        extended: {
+          lwgWorkflowId: workflowId,
+          lwgModelName: 'demo',
+          lwgNodeId: nodeId,
+          lwgTransitions: positions,
+          lwgTransitionNames: positions.map((p) => `${nodeId}-${p}`),
+          lwgTargets: positions.map((p) => fromSource[p].nodeTargetId),
+        },
+      };
+    };
+    const entries = done.map((nodeId, i) => {
+      const fromSource = graph.transitions.filter((t) => t.nodeSourceId === nodeId);
+      const positions = followed
+        .filter(([source]) => source === nodeId)
+        .map(([, label]) => fromSource.findIndex((t) => t.label === label));
+      return entry(i, WORKFLOW_ID, nodeId, positions);
+    });
+    // another workflow on the same document, with a transition not followed by this one: ignored
+    const followedKeys = new Set(
+      entries.flatMap((e) => e.extended.lwgTransitions.map((p) => `${e.extended.lwgNodeId}#${p}`)),
+    );
+    const count = new Map();
+    const notFollowed = graph.transitions
+      .map((t) => {
+        const position = count.get(t.nodeSourceId) || 0;
+        count.set(t.nodeSourceId, position + 1);
+        return [t.nodeSourceId, position];
+      })
+      .find(([source, position]) => !followedKeys.has(`${source}#${position}`));
+    if (notFollowed) {
+      entries.push(entry(entries.length, 'another-workflow', notFollowed[0], [notFollowed[1]]));
+    }
+    return entries;
   }
 
   const serial = {
@@ -104,7 +145,7 @@
     },
   };
   // the current step (Validate) was rejected once: done, but shown as current
-  serial.history = history(
+  serial.audit = audit(
     serial.graph,
     ['Task375f', 'Task38e', 'Task6d8'],
     [
@@ -138,7 +179,7 @@
       ],
     },
   };
-  parallel.history = history(
+  parallel.audit = audit(
     parallel.graph,
     ['Task21a0', 'Task2556'],
     [
@@ -166,7 +207,7 @@
       ],
     },
   };
-  subWorkflow.history = history(subWorkflow.graph, ['start-node'], [['start-node', 'automatic_transition']]);
+  subWorkflow.audit = audit(subWorkflow.graph, ['start-node'], [['start-node', 'automatic_transition']]);
 
   const contract = {
     label: 'Contract Approval (synthetic)',
@@ -216,7 +257,7 @@
     },
   };
   // the legal review requested changes once, finance approved with reservations, the merge waits for the legal review
-  contract.history = history(
+  contract.audit = audit(
     contract.graph,
     ['n-start', 'n-prepare', 'n-fork', 'n-legal', 'n-finance'],
     [
@@ -275,7 +316,7 @@
   }
 
   // Phases 1 to 4 are done (phase 2 was reworked once), in phase 5 the team 2 has done its review.
-  function buildLargeHistory(graph) {
+  function buildLargeAudit(graph) {
     const done = ['l-start'];
     const followed = [['l-start', 'automatic_transition']];
     for (let p = 1; p <= 5; p++) {
@@ -294,7 +335,7 @@
         followed.push([id('check'), 'Rework']);
       }
     }
-    return history(graph, done, followed);
+    return audit(graph, done, followed);
   }
 
   const large = {
@@ -302,9 +343,13 @@
     title: 'Large project',
     graph: buildLarge(),
   };
-  large.history = buildLargeHistory(large.graph);
+  large.audit = buildLargeAudit(large.graph);
 
   const samples = { serial, parallel, subWorkflow, contract, large };
+  Object.values(samples).forEach((s) => {
+    s.workflowId = WORKFLOW_ID;
+    s.documentId = DOCUMENT_ID;
+  });
 
   root.LWG_SAMPLES = samples;
   if (typeof module !== 'undefined' && module.exports) {

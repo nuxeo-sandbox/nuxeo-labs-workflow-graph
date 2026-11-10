@@ -9,12 +9,12 @@
   <artifactId>nuxeo-labs-workflow-graph-core</artifactId>
   <name>Nuxeo Labs Workflow Graph - Core</name>
   <description>
-    Server side of the workflow graph: records the transitions followed by graph workflows (one audit entry on the
-    workflow instance per completed step) and exposes the history of an instance (LabsWorkflowGraph.GetHistory).
+    Server side of the workflow graph: records the transitions followed by graph workflows (one audit entry on each
+    attached document per completed step), read by the graph dialog from the audit of the document.
   </description>
 
   <dependencies>
-    <!-- DocumentModel, CoreSession, CoreInstance.doPrivileged, Blobs -->
+    <!-- DocumentModel, DocumentModelList -->
     <dependency>
       <groupId>org.nuxeo.ecm.core</groupId>
       <artifactId>nuxeo-core-api</artifactId>
@@ -26,17 +26,6 @@
       <artifactId>nuxeo-core-event</artifactId>
       <scope>provided</scope>
     </dependency>
-    <!-- Predicates and OrderByExprs of the audit query -->
-    <dependency>
-      <groupId>org.nuxeo.ecm.core</groupId>
-      <artifactId>nuxeo-core-query</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.nuxeo.ecm.automation</groupId>
-      <artifactId>nuxeo-automation-core</artifactId>
-      <scope>provided</scope>
-    </dependency>
     <!-- GraphRoute, GraphNode and the routing constants -->
     <dependency>
       <groupId>org.nuxeo.ecm.routing</groupId>
@@ -46,12 +35,6 @@
     <dependency>
       <groupId>org.nuxeo.ecm.routing</groupId>
       <artifactId>nuxeo-routing-core</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <!-- AuditService, AuditBackend, AuditQueryBuilder, LogEntry -->
-    <dependency>
-      <groupId>org.nuxeo.ecm.platform</groupId>
-      <artifactId>nuxeo-platform-audit-core</artifactId>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -94,9 +77,22 @@
       <artifactId>nuxeo-core-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Predicates of the audit queries of the tests -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-query</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- the workflow engine runs automation chains -->
     <dependency>
       <groupId>org.nuxeo.ecm.automation</groupId>
       <artifactId>nuxeo-automation-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- AuditService, AuditQueryBuilder, LogEntry -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.platform</groupId>
+      <artifactId>nuxeo-platform-audit-core</artifactId>
       <scope>test</scope>
     </dependency>
     <!-- AuditFeature (in-memory audit backend by default) -->

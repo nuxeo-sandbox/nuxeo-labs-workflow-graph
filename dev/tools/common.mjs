@@ -64,6 +64,12 @@ export async function launchBrowser() {
 export function startServer() {
   const server = http.createServer((req, res) => {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    // requested by recent Chrome versions on the first page: answered without content, so no 404 is logged
+    if (pathname === '/favicon.ico') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
     const file = path.normalize(path.join(projectDir, pathname));
     if (!file.startsWith(projectDir)) {
       res.writeHead(403);

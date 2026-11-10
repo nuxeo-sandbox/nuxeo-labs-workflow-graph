@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <!--
   Audit of the transitions followed by graph workflows: the recorder (lwg-listener-contrib.xml) fires
-  lwgWorkflowStepCompleted on the workflow instance each time a step completes. Workflow instances are audited even if
-  they are system documents (ForceAudit facet added by the routing audit contribution).
+  lwgWorkflowStepCompleted on each document attached to the workflow each time a step completes. The readers of a
+  document can read its audit (GET /api/v1/id/{docId}/@audit): the graph dialog reads the history from there.
   The "routes" extension point exists since LTS 2025.16 (minimum version of the package).
 
   @since 2025.2
@@ -10,7 +10,6 @@
 <component name="nuxeo.labs.workflowgraph.audit">
 
   <require>org.nuxeo.audit.service.AuditComponent.defaultContrib</require>
-  <require>org.nuxeo.ecm.platform.routing.audit</require>
 
   <extension target="org.nuxeo.audit.service.AuditComponent" point="routes">
     <route name="default">
@@ -18,14 +17,28 @@
     </route>
   </extension>
 
-  <!-- Keys prefixed with "lwg": the OpenSearch audit backend has one mapping for the extended info of every event -->
+  <!--
+    Keys prefixed with "lwg": the OpenSearch audit backend has one mapping for the extended info of every event. Each
+    key always holds the same type. The three lists have the same order (the order of the followed transitions in the
+    step) and are empty for an end step.
+  -->
   <extension target="org.nuxeo.audit.service.AuditComponent" point="extendedInfo">
-    <!-- id of the completed step (rnode:nodeId) -->
+    <!-- id of the workflow instance (String) -->
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgWorkflowId"
+      expression="${message.properties.lwgWorkflowId}" />
+    <!-- name of the workflow model (String) -->
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgModelName"
+      expression="${message.properties.lwgModelName}" />
+    <!-- id of the completed step, rnode:nodeId (String) -->
     <extendedInfo event="lwgWorkflowStepCompleted" key="lwgNodeId" expression="${message.properties.lwgNodeId}" />
-    <!-- positions of the followed transitions in the step (definition order), comma separated, empty for an
-         end step -->
+    <!-- positions of the followed transitions in the step, definition order (list of numbers) -->
     <extendedInfo event="lwgWorkflowStepCompleted" key="lwgTransitions"
       expression="${message.properties.lwgTransitions}" />
+    <!-- names of the followed transitions (list of strings) -->
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgTransitionNames"
+      expression="${message.properties.lwgTransitionNames}" />
+    <!-- ids of the target steps of the followed transitions (list of strings) -->
+    <extendedInfo event="lwgWorkflowStepCompleted" key="lwgTargets" expression="${message.properties.lwgTargets}" />
   </extension>
 
 </component>

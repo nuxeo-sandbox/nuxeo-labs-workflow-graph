@@ -25,8 +25,7 @@ import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.RunnerFeature;
 
 /**
- * Workflow engine, audit (in-memory backend by default) and this bundle. The routing audit is not blacklisted (as
- * Nuxeo's own WorkflowFeature does): it makes workflow instances audited.
+ * Workflow engine, audit (in-memory backend by default) and this bundle.
  *
  * @since 2025.2
  */

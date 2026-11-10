@@ -21,39 +21,34 @@ package nuxeo.labs.workflowgraph;
 import static java.lang.Boolean.TRUE;
 import static java.util.stream.Collectors.toMap;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
-import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_KEY;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.nuxeo.audit.api.LogEntryConstants.LOG_EVENT_ID;
+import static org.nuxeo.audit.service.AuditComponent.DEFAULT_AUDIT_BACKEND;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import jakarta.inject.Inject;
-
-import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.nuxeo.audit.api.AuditQueryBuilder;
 import org.nuxeo.audit.api.LogEntry;
-import org.nuxeo.ecm.automation.AutomationService;
-import org.nuxeo.ecm.automation.OperationContext;
-import org.nuxeo.ecm.core.api.Blob;
-import org.nuxeo.ecm.core.api.CoreInstance;
-import org.nuxeo.ecm.core.api.DocumentNotFoundException;
-import org.nuxeo.ecm.core.api.DocumentSecurityException;
+import org.nuxeo.audit.service.AuditService;
 import org.nuxeo.ecm.core.api.IdRef;
-import org.nuxeo.ecm.core.api.NuxeoException;
-import org.nuxeo.ecm.core.api.impl.UserPrincipal;
+import org.nuxeo.ecm.core.io.registry.MarshallerHelper;
+import org.nuxeo.ecm.core.io.registry.context.RenderingContext.CtxBuilder;
+import org.nuxeo.ecm.core.query.sql.model.Predicates;
 import org.nuxeo.ecm.core.test.annotations.Granularity;
 import org.nuxeo.ecm.core.test.annotations.RepositoryConfig;
 import org.nuxeo.ecm.platform.routing.api.DocumentRoute;
 import org.nuxeo.ecm.platform.routing.core.impl.GraphNode;
 import org.nuxeo.ecm.platform.routing.core.impl.GraphNode.State;
 import org.nuxeo.ecm.platform.routing.core.impl.GraphRoute;
+import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 
@@ -61,7 +56,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Recorder ({@link StepCompletedListener}) and history ({@link WorkflowHistoryReader}, {@link GetWorkflowHistoryOp}).
+ * Recorder ({@link StepCompletedListener}): one audit entry per completed step on each document attached to the
+ * workflow, as read by the graph dialog.
  *
  * @since 2025.2
  */
@@ -70,31 +66,66 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @RepositoryConfig(cleanup = Granularity.METHOD)
 public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
 
-    @Inject
-    protected AutomationService automationService;
-
     @Test
     public void testSimplePath() {
         createSimpleModel();
         String id = startWorkflow();
 
-        WorkflowHistory history = history(id);
-        assertEquals(id, history.workflowId());
-        assertEquals(List.of("end:true:1", "start:true:1", "step:true:1"), steps(history));
-        assertEquals(List.of("start#0>step(toStep)=1", "step#0>end(toEnd)=1"), transitions(history));
+        assertEquals(List.of("end", "start#0(toStep)>step", "step#0(toEnd)>end"), recorded(file.getId(), id));
 
-        // one audit entry per completed step, on the workflow instance, the end step has no transition
-        List<LogEntry> entries = recorderEntries(id);
+        // one audit entry per completed step, on the attached document
+        List<LogEntry> entries = entries(file.getId());
         assertEquals(3, entries.size());
         Map<String, LogEntry> byNode = entries.stream()
                                               .collect(toMap(e -> e.getExtendedValue(NODE_ID_KEY), e -> e));
-        assertEquals("0", byNode.get("start").getExtendedValue(TRANSITIONS_KEY));
-        assertTrue(StringUtils.isEmpty(byNode.get("end").getExtendedValue(TRANSITIONS_KEY)));
-        assertEquals("start -> step (toStep)", byNode.get("start").getComment());
-        assertEquals("Routing", byNode.get("start").getCategory());
-        // the names documented for custom recorders
-        assertEquals("step", byNode.get("step").getExtendedValue("lwgNodeId"));
-        assertEquals("0", byNode.get("step").getExtendedValue("lwgTransitions"));
+        LogEntry start = byNode.get("start");
+        assertEquals("Routing", start.getCategory());
+        assertEquals("start -> step (toStep)", start.getComment());
+        assertEquals(file.getId(), start.getDocUUID());
+        assertEquals("File", start.getDocType());
+        // the end step follows no transition: empty lists
+        assertEquals("end", byNode.get("end").getComment());
+        assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTransitions"));
+        assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTransitionNames"));
+        assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTargets"));
+        // the names documented for custom recorders and read by the graph dialog
+        LogEntry step = byNode.get("step");
+        assertEquals(id, step.getExtendedValue("lwgWorkflowId"));
+        assertEquals(MODEL_NAME, step.getExtendedValue("lwgModelName"));
+        assertEquals("step", step.getExtendedValue("lwgNodeId"));
+        assertEquals(List.of(0L), longs(step.getExtendedValue("lwgTransitions")));
+        assertEquals(List.of("toEnd"), step.getExtendedValue("lwgTransitionNames"));
+        assertEquals(List.of("end"), step.getExtendedValue("lwgTargets"));
+
+        // nothing on the workflow instance
+        assertTrue(entries(id).isEmpty());
+    }
+
+    @Test
+    public void testJsonReadByTheGraphDialog() throws Exception {
+        createSimpleModel();
+        String id = startWorkflow();
+
+        // as returned by GET /api/v1/id/{docId}/@audit
+        Map<String, JsonNode> byNode = new HashMap<>();
+        for (LogEntry entry : entries(file.getId())) {
+            var json = new ObjectMapper().readTree(MarshallerHelper.objectToJson(LogEntry.class, entry,
+                    CtxBuilder.get()));
+            byNode.put(json.get("extended").get("lwgNodeId").asText(), json);
+        }
+        assertEquals(3, byNode.size());
+        JsonNode start = byNode.get("start");
+        assertEquals(STEP_COMPLETED_EVENT, start.get("eventId").asText());
+        JsonNode extended = start.get("extended");
+        assertEquals(id, extended.get("lwgWorkflowId").asText());
+        assertEquals(MODEL_NAME, extended.get("lwgModelName").asText());
+        assertEquals("[0]", extended.get("lwgTransitions").toString());
+        assertEquals("[\"toStep\"]", extended.get("lwgTransitionNames").toString());
+        assertEquals("[\"step\"]", extended.get("lwgTargets").toString());
+        JsonNode end = byNode.get("end").get("extended");
+        assertEquals("[]", end.get("lwgTransitions").toString());
+        assertEquals("[]", end.get("lwgTransitionNames").toString());
+        assertEquals("[]", end.get("lwgTargets").toString());
     }
 
     @Test
@@ -111,22 +142,16 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
-        // the review is the current step: started, not completed
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("review:false:1", "start:true:1"), steps(history));
-        assertEquals(List.of("start#0>review(toReview)=1"), transitions(history));
+        // the review is the current step: not completed yet
+        assertEquals(List.of("start#0(toReview)>review"), recorded(file.getId(), id));
 
         resume(id, "review", "reject");
-        history = history(id);
-        assertEquals(List.of("review:true:2", "start:true:1"), steps(history));
-        assertEquals(List.of("review#0>review(reject)=1", "start#0>review(toReview)=1"), transitions(history));
+        assertEquals(List.of("review#0(reject)>review", "start#0(toReview)>review"), recorded(file.getId(), id));
 
         resume(id, "review", "reject");
         resume(id, "review", "validate");
-        history = history(id);
-        assertEquals(List.of("end:true:1", "review:true:3", "start:true:1"), steps(history));
-        assertEquals(List.of("review#0>review(reject)=2", "review#1>end(validate)=1", "start#0>review(toReview)=1"),
-                transitions(history));
+        assertEquals(List.of("end", "review#0(reject)>review", "review#0(reject)>review", "review#1(validate)>end",
+                "start#0(toReview)>review"), recorded(file.getId(), id));
     }
 
     @Test
@@ -143,10 +168,8 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         });
         String id = startWorkflow();
 
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("a:true:1", "b:true:1", "merge:true:1", "start:true:1"), steps(history));
-        assertEquals(List.of("a#0>merge(aToMerge)=1", "b#0>merge(bToMerge)=1", "start#0>a(toA)=1",
-                "start#1>b(toB)=1"), transitions(history));
+        assertEquals(List.of("a#0(aToMerge)>merge", "b#0(bToMerge)>merge", "merge", "start#0(toA)>a#1(toB)>b"),
+                recorded(file.getId(), id));
     }
 
     @Test
@@ -163,32 +186,19 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
         String id = startWorkflow();
 
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("b:true:1", "end:true:1", "start:true:1"), steps(history));
-        assertEquals(List.of("b#0>end(bToEnd)=1", "start#1>b(first)=1"), transitions(history));
+        assertEquals(List.of("b#0(bToEnd)>end", "end", "start#1(first)>b"), recorded(file.getId(), id));
     }
 
     @Test
     public void testCanceledWorkflow() {
-        node("start", n -> {
-            n.setPropertyValue(GraphNode.PROP_START, TRUE);
-            setTransitions(n, transition("toReview", "review", "true"));
-        });
-        node("review", n -> {
-            n.setPropertyValue(GraphNode.PROP_HAS_TASK, TRUE);
-            setTransitions(n, transition("validate", "end", button("validate")));
-        });
-        node("end", n -> n.setPropertyValue(GraphNode.PROP_STOP, TRUE));
+        createReviewModel();
         String id = startWorkflow();
 
         session.getDocument(new IdRef(id)).getAdapter(DocumentRoute.class).cancel(session);
         session.save();
 
         // the canceled step (it was waiting for its task) is not recorded as completed
-        assertEquals(List.of("start"), recordedSteps(id));
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("review:false:1", "start:true:1"), steps(history));
-        assertEquals(List.of("start#0>review(toReview)=1"), transitions(history));
+        assertEquals(List.of("start#0(toReview)>review"), recorded(file.getId(), id));
     }
 
     @Test
@@ -209,12 +219,12 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         // the step completes with its last task only
         routing.endTask(session, openTasks(id, "review").get(0), new HashMap<>(), "validate");
         session.save();
-        assertEquals(List.of("start"), recordedSteps(id));
+        assertEquals(List.of("start#0(toReview)>review"), recorded(file.getId(), id));
 
         routing.endTask(session, openTasks(id, "review").get(0), new HashMap<>(), "validate");
         session.save();
-        assertEquals(List.of("end", "review", "start"), recordedSteps(id));
-        assertEquals(List.of("review#0>end(validate)=1", "start#0>review(toReview)=1"), transitions(history(id)));
+        assertEquals(List.of("end", "review#0(validate)>end", "start#0(toReview)>review"),
+                recorded(file.getId(), id));
     }
 
     @Test
@@ -238,18 +248,54 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         // "a" is done, "b" waits for its task: the merge waits for "b", it never started
         var graph = session.getDocument(new IdRef(id)).getAdapter(GraphRoute.class);
         assertEquals(State.WAITING, graph.getNode("merge").getState());
-        assertEquals(List.of("a", "start"), recordedSteps(id));
-        WorkflowHistory history = history(id);
-        assertEquals(List.of("a:true:1", "b:false:1", "start:true:1"), steps(history));
-        assertEquals(List.of("a#0>merge(aToMerge)=1", "start#0>a(toA)=1", "start#1>b(toB)=1"), transitions(history));
+        assertEquals(List.of("a#0(aToMerge)>merge", "start#0(toA)>a#1(toB)>b"), recorded(file.getId(), id));
 
         // once "b" is done, the merge completes once
         resume(id, "b", "done");
-        assertEquals(List.of("a", "b", "end", "merge", "start"), recordedSteps(id));
-        history = history(id);
-        assertEquals(List.of("a:true:1", "b:true:1", "end:true:1", "merge:true:1", "start:true:1"), steps(history));
-        assertEquals(List.of("a#0>merge(aToMerge)=1", "b#0>merge(bToMerge)=1", "merge#0>end(toEnd)=1",
-                "start#0>a(toA)=1", "start#1>b(toB)=1"), transitions(history));
+        assertEquals(List.of("a#0(aToMerge)>merge", "b#0(bToMerge)>merge", "end", "merge#0(toEnd)>end",
+                "start#0(toA)>a#1(toB)>b"), recorded(file.getId(), id));
+    }
+
+    @Test
+    public void testSeveralAttachedDocuments() {
+        var other = session.createDocument(session.createDocumentModel("/", "other", "File"));
+        createSimpleModel();
+        String id = startWorkflow(List.of(file.getId(), other.getId()));
+
+        // the same entries on each attached document
+        List<String> expected = List.of("end", "start#0(toStep)>step", "step#0(toEnd)>end");
+        assertEquals(expected, recorded(file.getId(), id));
+        assertEquals(expected, recorded(other.getId(), id));
+        entries(other.getId()).forEach(e -> assertEquals(other.getId(), e.getDocUUID()));
+    }
+
+    @Test
+    public void testAttachedDocumentDeletedWhileTheWorkflowRuns() {
+        var other = session.createDocument(session.createDocumentModel("/", "other", "File"));
+        createReviewModel();
+        String id = startWorkflow(List.of(file.getId(), other.getId()));
+        assertEquals(List.of("start#0(toReview)>review"), recorded(other.getId(), id));
+
+        // still listed by the workflow (Nuxeo removes it after the commit): skipped
+        session.removeDocument(other.getRef());
+        resume(id, "review", "validate");
+
+        assertEquals(List.of("end", "review#0(validate)>end", "start#0(toReview)>review"),
+                recorded(file.getId(), id));
+        assertEquals(List.of("start#0(toReview)>review"), recorded(other.getId(), id));
+    }
+
+    @Test
+    public void testWorkflowWithoutAttachedDocument() {
+        createSimpleModel();
+        String id = startWorkflow(List.of());
+
+        // the workflow is not disturbed, nothing is recorded
+        assertTrue(session.getDocument(new IdRef(id)).getAdapter(DocumentRoute.class).isDone());
+        txFeature.nextTransaction();
+        var backend = Framework.getService(AuditService.class).getAuditBackend(DEFAULT_AUDIT_BACKEND);
+        assertTrue(backend.queryLogs(new AuditQueryBuilder().predicate(
+                Predicates.eq(LOG_EVENT_ID, STEP_COMPLETED_EVENT))).isEmpty());
     }
 
     @Test
@@ -269,100 +315,23 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     }
 
     @Test
-    public void testOperationReturnsJson() throws Exception {
-        createSimpleModel();
-        String id = startWorkflow();
-        txFeature.nextTransaction();
-
-        JsonNode json;
-        try (OperationContext ctx = new OperationContext(session)) {
-            var blob = (Blob) automationService.run(ctx, GetWorkflowHistoryOp.ID, Map.of("workflowId", id));
-            assertEquals("application/json", blob.getMimeType());
-            json = new ObjectMapper().readTree(blob.getString());
-        }
-        assertEquals(id, json.get("workflowId").asText());
-        assertEquals(3, json.get("nodes").size());
-        JsonNode start = json.get("nodes").get(0);
-        assertEquals("start", start.get("id").asText());
-        assertTrue(start.get("completed").asBoolean());
-        assertEquals(1, start.get("starts").asLong());
-        assertEquals(2, json.get("transitions").size());
-        JsonNode first = sortedBySource(json.get("transitions")).get(0);
-        assertEquals("start", first.get("source").asText());
-        assertEquals(0, first.get("index").asInt());
-        assertEquals("toStep", first.get("name").asText());
-        assertEquals("step", first.get("target").asText());
-        assertEquals(1, first.get("count").asLong());
+    public void testPropertiesOfTheEvent() {
+        List<Map<String, Serializable>> transitions = List.of(transition("t0", "a", "true"),
+                transition("t1", "b", "true"), transition(null, null, "true"));
+        Map<String, Serializable> properties = StepCompletedListener.properties("wf", "Model", "fork", transitions,
+                List.of(1, 2));
+        assertEquals("Routing", properties.get("category"));
+        assertEquals("wf", properties.get("lwgWorkflowId"));
+        assertEquals("Model", properties.get("lwgModelName"));
+        assertEquals("fork", properties.get("lwgNodeId"));
+        assertEquals(List.of(1L, 2L), properties.get("lwgTransitions"));
+        // never null in the lists, the positions stay aligned
+        assertEquals(List.of("t1", ""), properties.get("lwgTransitionNames"));
+        assertEquals(List.of("b", ""), properties.get("lwgTargets"));
     }
 
-    @Test
-    public void testAccessOfTheReadersOfTheAttachedDocument() {
-        createSimpleModel();
-        String id = startWorkflow();
-        txFeature.nextTransaction();
-
-        var john = CoreInstance.getCoreSession(session.getRepositoryName(),
-                new UserPrincipal("john", List.of(), false, false));
-        assertThrows(DocumentSecurityException.class, () -> WorkflowHistoryReader.read(john, id));
-
-        grantRead(file.getRef(), "john");
-        assertEquals(List.of("start#0>step(toStep)=1", "step#0>end(toEnd)=1"),
-                transitions(WorkflowHistoryReader.read(john, id)));
-    }
-
-    @Test
-    public void testAccessOfTheReadersOfTheWorkflowInstance() {
-        createSimpleModel();
-        String id = startWorkflow();
-        txFeature.nextTransaction();
-
-        var jane = CoreInstance.getCoreSession(session.getRepositoryName(),
-                new UserPrincipal("jane", List.of(), false, false));
-        assertThrows(DocumentSecurityException.class, () -> WorkflowHistoryReader.read(jane, id));
-
-        grantRead(new IdRef(id), "jane");
-        assertEquals(3, WorkflowHistoryReader.read(jane, id).nodes().size());
-    }
-
-    @Test
-    public void testAccessOfAdministrators() {
-        createSimpleModel();
-        String id = startWorkflow();
-        txFeature.nextTransaction();
-
-        var admin = CoreInstance.getCoreSession(session.getRepositoryName(),
-                new UserPrincipal("boss", List.of(), false, true));
-        assertEquals(2, WorkflowHistoryReader.read(admin, id).transitions().size());
-    }
-
-    @Test
-    public void testInvalidIds() {
-        assertThrows(DocumentNotFoundException.class,
-                () -> WorkflowHistoryReader.read(session, "00000000-0000-0000-0000-000000000000"));
-        // a document that is not a workflow instance
-        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, file.getId()));
-        var e = assertThrows(NuxeoException.class, () -> WorkflowHistoryReader.read(session, " "));
-        assertEquals(400, e.getStatusCode());
-
-        // workflow models (draft, then validated) and steps are not workflow instances
-        createSimpleModel();
-        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, model.getId()));
-        String id = startWorkflow();
-        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, model.getId()));
-        String stepId = session.getDocument(new IdRef(id))
-                               .getAdapter(GraphRoute.class)
-                               .getNode("step")
-                               .getDocument()
-                               .getId();
-        assertThrows(DocumentNotFoundException.class, () -> WorkflowHistoryReader.read(session, stepId));
-        assertEquals(3, WorkflowHistoryReader.read(session, id).nodes().size());
-    }
-
-    /** Returns the elements of the JSON array, sorted by source. */
-    protected static List<JsonNode> sortedBySource(JsonNode array) {
-        List<JsonNode> list = new ArrayList<>();
-        array.forEach(list::add);
-        list.sort(Comparator.comparing((JsonNode n) -> n.get("source").asText()));
-        return list;
+    /** Returns the numbers of the list as longs (the audit backends may return Integer or Long). */
+    protected static List<Long> longs(List<?> values) {
+        return values.stream().map(v -> ((Number) v).longValue()).toList();
     }
 }

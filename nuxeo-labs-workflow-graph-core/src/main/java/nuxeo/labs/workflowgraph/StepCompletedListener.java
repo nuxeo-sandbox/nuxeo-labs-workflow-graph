@@ -20,10 +20,13 @@ package nuxeo.labs.workflowgraph;
 
 import static java.lang.Boolean.TRUE;
 import static java.util.stream.Collectors.joining;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.MODEL_NAME_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.NODE_ID_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.STEP_COMPLETED_EVENT;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TARGETS_KEY;
 import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_KEY;
-import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITIONS_SEPARATOR;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.TRANSITION_NAMES_KEY;
+import static nuxeo.labs.workflowgraph.WorkflowHistoryConstants.WORKFLOW_ID_KEY;
 import static org.nuxeo.ecm.core.api.event.CoreEventConstants.PREVIOUS_DOCUMENT_MODEL;
 import static org.nuxeo.ecm.platform.routing.api.DocumentRoutingConstants.DOCUMENT_ROUTE_DOCUMENT_FACET;
 import static org.nuxeo.ecm.platform.routing.api.DocumentRoutingConstants.ROUTE_NODE_DOCUMENT_TYPE;
@@ -43,6 +46,7 @@ import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -50,10 +54,12 @@ import org.apache.logging.log4j.Logger;
 import org.nuxeo.common.utils.ExceptionUtils;
 import org.nuxeo.ecm.core.api.ConcurrentUpdateException;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.DocumentModelList;
 import org.nuxeo.ecm.core.event.Event;
 import org.nuxeo.ecm.core.event.EventListener;
 import org.nuxeo.ecm.core.event.EventService;
 import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
+import org.nuxeo.ecm.platform.routing.core.impl.GraphRoute;
 import org.nuxeo.runtime.api.Framework;
 import org.nuxeo.runtime.transaction.TransactionHelper;
 
@@ -63,8 +69,11 @@ import org.nuxeo.runtime.transaction.TransactionHelper;
  * When a step completes, the workflow engine evaluates its transitions ({@code rnode:transitions/*}/result), then
  * saves the step with a new {@code rnode:endDate}. The results are reset as soon as a target step starts, so this
  * synchronous listener reads them at that save ({@code beforeDocumentModification}) and fires
- * {@link WorkflowHistoryConstants#STEP_COMPLETED_EVENT} on the workflow instance. The event is audited (see
- * {@code OSGI-INF/lwg-audit-contrib.xml}), with the id of the step and the positions of the followed transitions.
+ * {@link WorkflowHistoryConstants#STEP_COMPLETED_EVENT} on <b>each document attached to the workflow</b> (the ones
+ * that still exist). The event is audited (see {@code OSGI-INF/lwg-audit-contrib.xml}) with the id of the workflow,
+ * its model, the id of the step and the followed transitions (positions, names and targets): the readers of a
+ * document can read its audit, so the graph dialog reads the history from there, and it stays after the workflow
+ * instance is removed by Nuxeo's daily cleanup. Nothing is recorded when no attached document is left.
  * <p>
  * The history is a nice-to-have: an error is logged and does not break the workflow. As in the event service, an
  * error is only rethrown when the transaction fails anyway: a {@link ConcurrentUpdateException}, an interrupted
@@ -134,23 +143,59 @@ public class StepCompletedListener implements EventListener {
             return;
         }
         // the workflow engine runs with a system session: the workflow instance (the parent) can be read
-        var route = session.getDocument(parentRef);
-        if (!route.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET)) {
+        var parent = session.getDocument(parentRef);
+        var route = parent.hasFacet(DOCUMENT_ROUTE_DOCUMENT_FACET) ? parent.getAdapter(GraphRoute.class) : null;
+        if (route == null) {
             return;
         }
         var nodeId = (String) node.getPropertyValue(PROP_NODE_ID);
+        // the attached documents that still exist (deleted ones are skipped)
+        DocumentModelList documents = route.getAttachedDocumentModels();
+        if (documents.isEmpty()) {
+            log.debug("Step {} of workflow {} completed, no attached document left: nothing recorded", nodeId,
+                    parent.getId());
+            return;
+        }
         List<Map<String, Serializable>> transitions = transitions(node);
         List<Integer> followed = followedTransitions(node, transitions);
+        Map<String, Serializable> properties = properties(parent.getId(), route.getModelName(), nodeId, transitions,
+                followed);
+        var eventService = Framework.getService(EventService.class);
+        for (DocumentModel document : documents) {
+            var ctx = new DocumentEventContext(session, docCtx.getPrincipal(), document);
+            ctx.setProperties(new HashMap<>(properties));
+            eventService.fireEvent(ctx.newEvent(STEP_COMPLETED_EVENT));
+        }
+        log.debug("Step {} of workflow {} completed, followed transitions: {}, recorded on {} document(s)", nodeId,
+                parent.getId(), followed, documents.size());
+    }
 
+    /**
+     * Returns the properties of the event, stored as audit extended info (see {@link WorkflowHistoryConstants}): the
+     * three lists have the same order, the order of the followed transitions in the step.
+     */
+    protected static Map<String, Serializable> properties(String workflowId, String modelName, String nodeId,
+            List<Map<String, Serializable>> transitions, List<Integer> followed) {
+        ArrayList<Long> positions = new ArrayList<>();
+        ArrayList<String> names = new ArrayList<>();
+        ArrayList<String> targets = new ArrayList<>();
+        for (int i : followed) {
+            var t = transitions.get(i);
+            positions.add((long) i);
+            // never null in the lists: a null value is dropped when the audit entry is read, shifting the others
+            names.add(Objects.toString(t.get(PROP_TRANS_NAME), ""));
+            targets.add(Objects.toString(t.get(PROP_TRANS_TARGET), ""));
+        }
         Map<String, Serializable> properties = new HashMap<>();
         properties.put(DocumentEventContext.CATEGORY_PROPERTY_KEY, ROUTING_CATEGORY);
         properties.put(DocumentEventContext.COMMENT_PROPERTY_KEY, comment(nodeId, transitions, followed));
+        properties.put(WORKFLOW_ID_KEY, workflowId);
+        properties.put(MODEL_NAME_KEY, modelName);
         properties.put(NODE_ID_KEY, nodeId);
-        properties.put(TRANSITIONS_KEY, followed.stream().map(String::valueOf).collect(joining(TRANSITIONS_SEPARATOR)));
-        var ctx = new DocumentEventContext(session, docCtx.getPrincipal(), route);
-        ctx.setProperties(properties);
-        Framework.getService(EventService.class).fireEvent(ctx.newEvent(STEP_COMPLETED_EVENT));
-        log.debug("Step {} of workflow {} completed, followed transitions: {}", nodeId, route.getId(), followed);
+        properties.put(TRANSITIONS_KEY, positions);
+        properties.put(TRANSITION_NAMES_KEY, names);
+        properties.put(TARGETS_KEY, targets);
+        return properties;
     }
 
     /** Returns the transitions of the step ({@code rnode:transitions}), never null. */
