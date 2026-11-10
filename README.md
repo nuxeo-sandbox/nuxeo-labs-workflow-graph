@@ -59,13 +59,13 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
 - **Next transitions**: the transitions leaving the current step(s) keep their color and are drawn thicker, with
   bigger arrow heads and emphasized labels, on top of the other transitions. A single one is drawn in the
   highlight color.
-- **History** (since 2025.2): the steps already done (completed at least once) get a border and a check badge, the
+- **History**: the steps already done (completed at least once) get a border and a check badge, the
   transitions already followed are drawn in the same color (`--lwg-passed`), a bit thicker, as a trail from the
   start to the current step(s). The current look wins: a current step that was done before (loop) is shown as
   current, a transition leaving a current step is shown as a next transition. The history is read from the audit of
   a document attached to the workflow: what is recorded since the installation of the plugin, visible to the users
   who can read the document. See [Server side](#server-side) for what is recorded and its limits.
-- **Branches not followed** (since 2025.2): what was not done and cannot happen anymore is faded and grayed, so
+- **Branches not followed**: what was not done and cannot happen anymore is faded and grayed, so
   the path and what can still happen stand out in a large workflow:
   - a step is dimmed when it never started (not current, not waiting for other branches, not the target of a
     followed transition) **and** cannot be reached anymore: no transition leads to it from a current step (or from
@@ -143,7 +143,7 @@ dialog opens, and after a click on the graph.
 Nuxeo does not keep the path followed by a graph workflow: the graph endpoint only tells which steps are current (a
 step that is done goes back to the `ready` state, like a step never reached), the result of a transition is reset
 as soon as its target step starts, and Nuxeo removes the done and canceled workflow instances with its daily cleanup.
-So the plugin (since 2025.2) adds a small Java bundle, `nuxeo-labs-workflow-graph-core`, that records the steps done
+So the plugin adds a small Java bundle, `nuxeo-labs-workflow-graph-core`, that records the steps done
 and the transitions followed **in the audit of the documents attached to the workflow**. The graph reads them with
 the REST API, as Web UI's History tab does: no server operation, no privileged access.
 
