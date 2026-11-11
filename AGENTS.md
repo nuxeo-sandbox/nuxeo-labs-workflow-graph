@@ -34,6 +34,18 @@ Java package `nuxeo.labs.workflowgraph`, audited event `lwgWorkflowStepCompleted
 audit entries, `eventType.lwgWorkflowStepCompleted`, `activity.lwgWorkflowStepCompleted` and `eventCategory.Routing`
 (missing in Web UI, used by every routing event), in the plugin's `messages*.json`.
 
+### Possible evolutions (not implemented)
+
+`Possible Evolutions/` (not packaged) holds improvements studied with the user but **not implemented**, each with its
+verified findings (Nuxeo and Web UI sources, with line references), the decisions taken and an implementation plan.
+Read the matching document before working on one of them instead of re-checking the sources, and check its line
+references again if the Nuxeo hotfix level changed a lot.
+
+- `Possible Evolutions/LwgWorkflowHistory.md`: one `LwgWorkflowHistory` record per ended workflow (done, canceled,
+  or removed while running), captured in the transaction that ends it, readable and purgeable by configured groups,
+  drawn by the dialog once the instance is purged. Kept out of the plugin for now: the server side stays light (the
+  recorder only).
+
 ### Scope (decided with the user, keep it)
 
 - The graph is **read-only**: steps and labels are not clickable nor focusable, no hover effect, no selection,
@@ -135,8 +147,8 @@ audit entries, `eventType.lwgWorkflowStepCompleted`, `activity.lwgWorkflowStepCo
 ## Conventions
 
 - Apache 2.0 header `(C) Copyright 2026 Hyland (http://hyland.com/) and others.` with
-  `Contributors: Thibaud Arguillere (with the help of opencode/Claude Opus 5.5)` on every new file (Java, JS, HTML,
-  MJS).
+  `Contributors: <author name> (with the help of opencode/Claude Opus 5.5)` on every new file (Java, JS, HTML, MJS;
+  same author as in the existing files).
 - `@since 2025.2` on new files / public API (`@since 2025.1` for what existed in 2025.1).
 - JavaScript comments: `//` for 1 to 3 lines, `/* ... */` for 4+ lines or for section separators such as
   `/* ==================== Layout ==================== */`.
