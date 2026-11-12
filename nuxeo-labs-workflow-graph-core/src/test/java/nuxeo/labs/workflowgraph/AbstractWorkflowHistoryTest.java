@@ -89,10 +89,12 @@ public abstract class AbstractWorkflowHistoryTest {
         model = session.createDocument(model);
     }
 
-    /** Creates a step of the model. */
+    /** Creates a step of the model (with a position, required by the graph endpoint). */
     protected DocumentModel node(String id, Consumer<DocumentModel> setup) {
         var node = session.createDocumentModel(model.getPathAsString(), id, ROUTE_NODE_DOCUMENT_TYPE);
         node.setPropertyValue(GraphNode.PROP_NODE_ID, id);
+        node.setPropertyValue(GraphNode.PROP_NODE_X_COORDINATE, "0");
+        node.setPropertyValue(GraphNode.PROP_NODE_Y_COORDINATE, "0");
         setup.accept(node);
         return session.createDocument(node);
     }
@@ -146,7 +148,7 @@ public abstract class AbstractWorkflowHistoryTest {
 
     /** Validates the model, then creates and starts an instance attached to the documents. Returns its id. */
     protected String startWorkflow(List<String> documentIds) {
-        var route = model.getAdapter(DocumentRoute.class);
+        var route = session.getDocument(model.getRef()).getAdapter(DocumentRoute.class);
         if (!route.isValidated()) {
             routing.validateRouteModel(route, session);
         }

@@ -71,9 +71,10 @@ import org.nuxeo.runtime.transaction.TransactionHelper;
  * synchronous listener reads them at that save ({@code beforeDocumentModification}) and fires
  * {@link WorkflowHistoryConstants#STEP_COMPLETED_EVENT} on <b>each document attached to the workflow</b> (the ones
  * that still exist). The event is audited (see {@code OSGI-INF/lwg-audit-contrib.xml}) with the id of the workflow,
- * its model, the id of the step and the followed transitions (positions, names and targets): the readers of a
- * document can read its audit, so the graph dialog reads the history from there, and it stays after the workflow
- * instance is removed by Nuxeo's daily cleanup. Nothing is recorded when no attached document is left.
+ * its model, the id of the step and the followed transitions (positions, names and targets): the graph reads the
+ * history from the audit of an attached document that the user can read ({@link GetWorkflowGraphOperation}), and it
+ * stays after the workflow instance is removed by Nuxeo's daily cleanup. Nothing is recorded when no attached
+ * document is left.
  * <p>
  * The history is a nice-to-have: an error is logged and does not break the workflow. As in the event service, an
  * error is only rethrown when the transaction fails anyway: a {@link ConcurrentUpdateException}, an interrupted

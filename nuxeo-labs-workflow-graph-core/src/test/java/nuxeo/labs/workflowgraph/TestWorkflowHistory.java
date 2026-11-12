@@ -57,7 +57,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Recorder ({@link StepCompletedListener}): one audit entry per completed step on each document attached to the
- * workflow, as read by the graph dialog.
+ * workflow, as read by {@link GetWorkflowGraphOperation}.
  *
  * @since 2025.2
  */
@@ -88,7 +88,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
         assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTransitions"));
         assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTransitionNames"));
         assertEquals(List.of(), byNode.get("end").getExtendedValue("lwgTargets"));
-        // the names documented for custom recorders and read by the graph dialog
+        // the names documented for custom recorders and read by the operation
         LogEntry step = byNode.get("step");
         assertEquals(id, step.getExtendedValue("lwgWorkflowId"));
         assertEquals(MODEL_NAME, step.getExtendedValue("lwgModelName"));
@@ -102,7 +102,7 @@ public class TestWorkflowHistory extends AbstractWorkflowHistoryTest {
     }
 
     @Test
-    public void testJsonReadByTheGraphDialog() throws Exception {
+    public void testJsonOfTheRestApi() throws Exception {
         createSimpleModel();
         String id = startWorkflow();
 

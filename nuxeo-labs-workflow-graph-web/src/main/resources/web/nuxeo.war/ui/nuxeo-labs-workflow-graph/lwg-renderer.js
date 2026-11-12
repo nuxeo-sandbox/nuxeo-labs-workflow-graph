@@ -27,8 +27,7 @@
  *
  *   const renderer = new LWG.Renderer(containerElement, { onDirectionChange(direction) {...} });
  *   renderer.setGraph(jsonOfWorkflowGraphEndpoint, { direction: 'LR' });   // throws if the layout fails
- *   renderer.setGraph(graph, { history: LWG.historyFromAudit(entries, id) }); // steps done, transitions followed,
- *                                                                           // branches not followed dimmed
+ *   renderer.setGraph(graph, { history });   // steps done, transitions followed, branches not followed dimmed
  *
  * Steps and labels are HTML elements (crisp text), transitions are SVG paths below them. Every position comes
  * from the layout, nothing is read back from the DOM, so the graph can be built while hidden.
@@ -135,7 +134,8 @@
     /*
      * Builds the model, computes the layout and draws. Throws when the layout cannot be computed.
      * options: { direction: 'TB' | 'LR' (TB by default), history: history of the workflow, optional (steps already
-     * done and transitions already followed, see LWG.historyFromAudit and LWG.normalizeHistory) }
+     * done and transitions already followed, as returned by LabsWorkflowGraph.GetWorkflowGraph, see
+     * LWG.normalizeHistory) }
      */
     setGraph(graph, options) {
       const opts = options || {};

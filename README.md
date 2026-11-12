@@ -105,13 +105,12 @@ dialog opens, and after a click on the graph.
 
 ## How it works
 
-- The data comes from the REST API: `GET /api/v1/workflow/{id}/graph` (steps, kinds, states, transitions and their
-  labels), `GET /api/v1/workflow/{id}` (title of the dialog, name of the workflow model and attached documents,
-  optional) and `GET /api/v1/id/{docId}/@audit` (history, optional, see [Server side](#server-side)). They are
-  requested in parallel, the graph is drawn once all have answered.
-- The history is read from the audit of a document attached to the workflow: the document of the page (document
-  workflow bar) or the target documents of the task (task view) first, then the attached documents of the workflow.
-  A document the user cannot read is skipped.
+- The data comes from one call to the operation `LabsWorkflowGraph.GetWorkflowGraph` of the plugin (see
+  [Server side](#server-side)): the workflow (title of the dialog, name of the workflow model), its graph (steps,
+  kinds, states, transitions and their labels, as `GET /api/v1/workflow/{id}/graph`) and its history (steps done,
+  transitions followed). The graph is drawn once it has answered.
+- The history is read by the server from the audit of the first document attached to the workflow that the user can
+  read. The labels translated by the server use the language of Web UI.
 - Web UI's default graph is the `nuxeo-workflow-graph` element (jsPlumb, fixed 880x720 canvas, Studio positions).
   It is used by the document workflow bar and by the task view, which both only call its `show()` method. The
   element cannot be redefined, so this plugin **patches `show()`** once the element is defined: the plugin's
@@ -122,11 +121,10 @@ dialog opens, and after a click on the graph.
   `nuxeo-labs-workflow-graph.direction.model.<workflowModelName>` of the browser's local storage (going back to
   top to bottom removes it). Nothing is stored on the server, so the choice is per browser.
 
-| Call | If it fails |
+| Failure | Result |
 | --- | --- |
-| `GET /api/v1/workflow/{id}/graph` | the dialog closes and Web UI's usual error message is shown |
-| `GET /api/v1/workflow/{id}` | the title is "Workflow", and the direction is kept for this workflow instance only |
-| `GET /api/v1/id/{docId}/@audit` | the next attached document is tried; when none can be read, the graph is drawn without the history (a warning is logged in the browser console) |
+| The operation fails (e.g. unknown workflow: 404) | the dialog closes and Web UI's usual error message is shown |
+| The history cannot be read (no attached document the user can read, audit error) | the graph is drawn without the history (a warning is logged in the browser console, an audit error in the server log) |
 | Layout or drawing error | the dialog closes and Web UI's default graph is opened |
 
 > [!WARNING]
@@ -144,8 +142,8 @@ Nuxeo does not keep the path followed by a graph workflow: the graph endpoint on
 step that is done goes back to the `ready` state, like a step never reached), the result of a transition is reset
 as soon as its target step starts, and Nuxeo removes the done and canceled workflow instances with its daily cleanup.
 So the plugin adds a small Java bundle, `nuxeo-labs-workflow-graph-core`, that records the steps done
-and the transitions followed **in the audit of the documents attached to the workflow**. The graph reads them with
-the REST API, as Web UI's History tab does: no server operation, no privileged access.
+and the transitions followed **in the audit of the documents attached to the workflow**, and an operation that
+returns everything the graph draws in one call.
 
 **Recorder: from the installation on.** A synchronous listener (`beforeDocumentModification`) detects that a step
 completes (the workflow engine saves it with a new `rnode:endDate`, right after evaluating its transitions) and
@@ -197,13 +195,55 @@ rethrown, as Nuxeo's event service does. Besides the fields above, the audit fil
 user who completed the step, path, type and state of the document). Nothing else is stored: no task comment, no
 workflow or step variable.
 
-**Who can see it.** The users who can read the document. The graph reads the audit with
-`GET /api/v1/id/{docId}/@audit?eventId=lwgWorkflowStepCompleted` (`READ` on the document is required, as for Web
-UI's History tab) and keeps the entries of the workflow (`lwgWorkflowId`) itself: the audit cannot filter on extended
-info. The entries also appear in the **History** tab and in the **Activity** sidebar of the document. The plugin adds
+**Who can see it.** The users who can read the document: the operation (below) checks `READ` on the document with
+the user's session, as Web UI's History tab (`GET /api/v1/id/{docId}/@audit`) requires, before reading its audit.
+The entries also appear in the **History** tab and in the **Activity** sidebar of the document. The plugin adds
 their labels to Web UI's translations (English and French): "Workflow step completed" (History), "completed a
 workflow step" (Activity), and "Workflow" for the `Routing` category, which Web UI otherwise displays as a raw key,
 also for its own workflow events.
+
+**Reading: the operation `LabsWorkflowGraph.GetWorkflowGraph`.** Called by the graph dialog, it returns a JSON blob
+with everything the graph draws:
+
+| Parameter | Description |
+| --- | --- |
+| `workflowId` | id of the workflow instance (required) |
+| `language` | language of the labels translated by the server, e.g. `fr` or `fr-FR` (optional, English by default; the dialog sends the language of Web UI) |
+
+Response (shortened):
+
+```json
+{
+  "workflow": {
+    "id": "9f8e7d6c-...",
+    "name": "SerialDocumentReview",
+    "title": "wf.serialDocumentReview.SerialDocumentReview",
+    "state": "running",
+    "workflowModelName": "SerialDocumentReview"
+  },
+  "graph": { "nodes": ["..."], "transitions": ["..."] },
+  "history": {
+    "nodes": [{ "id": "Task6d8", "completed": true, "count": 2 }],
+    "transitions": [
+      { "source": "Task6d8", "index": 3, "name": "sdr_validationTask6d8", "target": "Task6d8", "count": 1 }
+    ],
+    "truncated": false
+  }
+}
+```
+
+- `workflow`: the fields of `GET /api/v1/workflow/{id}` used by the graph. `graph`: as
+  `GET /api/v1/workflow/{id}/graph`. `history`: the steps completed at least once and the transitions followed at
+  least once (`index`: position in the step, definition order), with their counts, from the audit entries of the
+  recorder for this workflow; `null` when no attached document can be read by the user, or when the audit cannot be
+  read (logged on the server).
+- **Permissions.** As Nuxeo's graph endpoint does, the workflow is read with a privileged session: the users who can
+  read the attached documents but not the workflow instance (`GET /api/v1/workflow/{id}` answers 403 to them) get its
+  title and model name too. Only workflows are read this way: any other id is answered as an unknown workflow (404),
+  whether the document exists or not. The ids of the attached documents are never returned: they are only used to
+  find the first one the user can read (`READ`, checked with the user's session), whose audit holds the history.
+- The audit backends that can filter on extended info (OpenSearch, MongoDB) return the entries of this workflow
+  only; with the SQL backend, the entries of every workflow of the document are read and filtered by the operation.
 
 **Limits.**
 
@@ -216,8 +256,9 @@ also for its own workflow events.
   after the task is completed.
 - One entry per attached document: a workflow on 3 documents writes 3 identical entries per completed step, on
   their 3 audits.
-- The dialog reads at most 10,000 entries of the event per document (10 pages of 1,000, most recent first): for a
-  document with more, the oldest ones are ignored (a warning is logged in the browser console).
+- The operation reads at most 10,000 entries of the event per document (most recent first): for a document with
+  more, the oldest ones are ignored (`truncated` is true, a warning is logged on the server and in the browser
+  console). It checks at most the first 1,000 attached documents to find one that the user can read.
 - The plugin deletes nothing: the entries stay in the audit of the documents, as any audit entry, also once Nuxeo has
   removed the workflow instance (Web UI only opens the graph of the running workflows, though).
 
@@ -339,12 +380,15 @@ nuxeo-labs-workflow-graph-core/src/main/
 ├── java/nuxeo/labs/workflowgraph/
 │   ├── StepCompletedListener.java     records the transitions followed (one audit entry per completed step, on
 │   │                                  each attached document)
+│   ├── GetWorkflowGraphOperation.java operation LabsWorkflowGraph.GetWorkflowGraph: workflow, graph and history
+│   ├── WorkflowHistory.java           history of a workflow built from the audit entries of the recorder
 │   └── WorkflowHistoryConstants.java  event name, audit extended info keys
 └── resources/
     ├── META-INF/MANIFEST.MF
     └── OSGI-INF/
         ├── lwg-audit-contrib.xml       audited event and its extended info
-        └── lwg-listener-contrib.xml    the recorder
+        ├── lwg-listener-contrib.xml    the recorder
+        └── lwg-operations-contrib.xml  the operation
 
 nuxeo-labs-workflow-graph-web/src/main/resources/
 ├── META-INF/MANIFEST.MF
@@ -360,8 +404,8 @@ nuxeo-labs-workflow-graph-web/src/main/resources/
         ├── lwg-icons.js               inline SVG icons (Material Icons)
         ├── lwg-styles.js              CSS of the graph (no animation)
         ├── lwg-renderer.js            LWG.Renderer: drawing, zoom, pan, fit, center, direction (framework-free)
-        ├── nuxeo-labs-workflow-graph-dialog.html   Polymer dialog: title, loading, graph, history (audit),
-        │                                            direction memory
+        ├── nuxeo-labs-workflow-graph-dialog.html   Polymer dialog: title, loading, graph (one call to the
+        │                                            operation), direction memory
         ├── lwg-override.js            patch of nuxeo-workflow-graph.show()
         └── vendor/dagre.min.js        dagre 3.1.3 (MIT), unmodified
 ```
@@ -376,10 +420,10 @@ The `dev/` folder is not packaged. Nothing is installed by the project: the brow
 
 | Command | What it does |
 | --- | --- |
-| `node --test dev/test` | Unit tests of the directions and their storage, translations, model (including the transition colors and the history read from the audit entries), geometry and layout (every sample in both directions: steps placed without overlap, transitions attached to their steps, labels off the steps). Node 20+, no dependency |
+| `node --test dev/test` | Unit tests of the directions and their storage, translations, model (including the transition colors and the history in the format of the operation), geometry and layout (every sample in both directions: steps placed without overlap, transitions attached to their steps, labels off the steps). Node 20+, no dependency |
 | `python3 -m http.server 8765` then `http://localhost:8765/dev/demo/index.html` | Demo of the renderer with the sample workflows, themes and languages (URL parameters: `wf`, `theme`, `lang`, `dir` to force `TB` or `LR`, otherwise the direction is kept per sample as in the dialog; `history=off` hides the history) |
 | `node dev/tools/screenshots.mjs [filter]` | Renders every sample in every theme (and left to right) in headless Chrome and writes `dev/out/demo/*.png`, then checks the interactions: initial view (zoom on the current step for a large graph), `F`, `C` (cycling), `+`, `-`, minimum zoom, toolbar, Ctrl + wheel, wheel, drag, no animation, steps not focusable, transition colors, color overrides, history (steps done, transitions followed, branches not followed, steps still to come not dimmed, sizes, drawing order, `--lwg-passed`, `--lwg-dimmed-opacity`), direction switch (toolbar and `↓` / `→` keys, view reset, kept per workflow, not stored for TB). Fails on any console error or warning. Filter `checks`: interaction checks only |
-| `mvn clean install` | Builds the bundles and the package, and runs the Java tests (JUnit 4, in-memory audit): entries written by the recorder on the attached document (values of every key, JSON as returned by the REST API, nothing on the workflow instance) on a simple path, a loop, a fork and merge, a merge waiting for another branch, "execute only the first transition", a step with several tasks, a canceled workflow, several attached documents, an attached document deleted while the workflow runs, a workflow without attached document, the length of the audit comment, the recorder disabled. Add `-Dnuxeo.test.audit=sql` to run them with the SQL audit backend (H2) |
+| `mvn clean install` | Builds the bundles and the package, and runs the Java tests (JUnit 4, in-memory audit): entries written by the recorder on the attached document (values of every key, JSON as returned by the REST API, nothing on the workflow instance) on a simple path, a loop, a fork and merge, a merge waiting for another branch, "execute only the first transition", a step with several tasks, a canceled workflow, several attached documents, an attached document deleted while the workflow runs, a workflow without attached document, the length of the audit comment, the recorder disabled; the operation (workflow fields, graph identical to Nuxeo's, history and its JSON, loops and counts, other workflows of the document ignored, a reader of the document who cannot read the workflow, a user who cannot read the documents, the first readable attached document, a deleted attached document, no attached document, unknown ids and non-workflow documents answered the same way, language); the history built from audit entries (order, counts, other workflows and events, values of other types). Add `-Dnuxeo.test.audit=sql` to run them with the SQL audit backend (H2) |
 
 Environment variables of the browser tool:
 
@@ -390,9 +434,8 @@ Environment variables of the browser tool:
 
 The samples (`dev/demo/samples.js`) are SerialDocumentReview, ParallelDocumentReview and MainWF rebuilt from the
 Nuxeo sources, plus two synthetic workflows: "contract" (fork, merge, loops, sub-workflow, long titles) and
-"large" (59 steps, two current steps in parallel branches). Each one has an audit: the entries the recorder would
-write on an attached document, in the format of `GET /api/v1/id/{docId}/@audit`, plus one entry of another workflow
-(ignored).
+"large" (59 steps, two current steps in parallel branches). Each one has a history, in the format returned by the
+operation (the Java tests cover how the operation builds it from the audit entries).
 
 ## Build
 

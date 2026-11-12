@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!--
+  LabsWorkflowGraph.GetWorkflowGraph: the workflow, its graph and its history in one call, read by the graph dialog
+  of Web UI. See GetWorkflowGraphOperation.
+
+  @since 2025.3
+-->
+<component name="nuxeo.labs.workflowgraph.operations">
+
+  <extension target="org.nuxeo.ecm.core.operation.OperationServiceComponent" point="operations">
+    <operation class="nuxeo.labs.workflowgraph.GetWorkflowGraphOperation" />
+  </extension>
+
+</component>

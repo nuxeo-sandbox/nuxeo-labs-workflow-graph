@@ -12,13 +12,19 @@ workflow (steps already done, transitions already followed) in the audit of its 
 fallback (dialog not available, layout failure).
 There is **no setting** to turn the plugin off (removed on purpose: it needed a restart, like uninstalling the
 package); do not add one back.
-Data: `GET /api/v1/workflow/{id}/graph` (required), `GET /api/v1/workflow/{id}` (title, model name, attached
-documents, optional; 403 for the users who only read the document) and `GET /api/v1/id/{docId}/@audit` (history,
-optional), requested in parallel; the graph is drawn once all have answered. An optional call that fails only logs
-a `console.warn`. **No server operation, no privileged read** (decided with the user): the history is in the audit
-of the documents, readable by their readers. `show()` passes the documents known by the host element (document of
-`nuxeo-document-info-bar`, `task.targetDocumentIds` of `nuxeo-document-task`, see `documentHints`); the dialog tries
-them, then `attachedDocumentIds` of the workflow entity, skipping 403/404.
+Data (2025.3): **one call** to the plugin's operation `LabsWorkflowGraph.GetWorkflowGraph` (`GetWorkflowGraphOperation`,
+params `workflowId`, `language` = Web UI's language), which returns a JSON blob `{ workflow, graph, history }`:
+`workflow` = `id`, `name`, `title`, `state`, `workflowModelName` (the fields of `GET /api/v1/workflow/{id}` used by
+the dialog), `graph` = `JsonGraphRoute.getGraphElementsAsMap` (same JSON as `GET /api/v1/workflow/{id}/graph`),
+`history` = `WorkflowHistory` (format of `LWG.normalizeHistory` plus `truncated`) or null. Decided with the user
+(option B): the workflow is read with a **privileged session**, as Nuxeo's graph endpoint does, so the readers of the
+documents who cannot read the instance get its title and model name; only documents with the `DocumentRoute` facet
+are read this way, any other id gets the same 404 as an unknown id. The attached document ids are **never returned**:
+the history comes from the audit of the first attached document the **user** can read (`exists` + `READ` with the
+user's session, at most `MAX_DOCUMENTS_TRIED`), at most `MAX_HISTORY_ENTRIES` entries, most recent first, filtered on
+`extended/lwgWorkflowId` when the backend has `EXTENDED_INFO_SEARCH` (not SQL), always filtered in Java too
+(`WorkflowHistory.fromAudit`). A history error is logged and gives `history: null` (rethrown only when interrupted
+or the transaction is rollback-only). The dialog no longer reads REST endpoints, nor the host element's documents.
 
 Nuxeo may one day audit the followed transitions itself (a possible improvement of Nuxeo: an event fired on the
 attached documents by `GraphRunner`). The plugin then needs a new version (use Nuxeo's entries, stop recording,
@@ -30,7 +36,8 @@ legend...). The two packages conflict (`package.xml`). Names never overlap: name
 (`LWG`), files and CSS classes `lwg-*`, i18n keys `labsWorkflowGraph.*`, elements `nuxeo-labs-workflow-graph-*`,
 Java package `nuxeo.labs.workflowgraph`, audited event `lwgWorkflowStepCompleted` and its extended info `lwg*`
 (`lwgWorkflowId`, `lwgModelName`, `lwgNodeId`, `lwgTransitions`, `lwgTransitionNames`, `lwgTargets`), listener
-`lwgStepCompletedListener`, OSGi components `nuxeo.labs.workflowgraph.*`. Only exceptions: the Web UI labels of the
+`lwgStepCompletedListener`, operation `LabsWorkflowGraph.GetWorkflowGraph`, OSGi components
+`nuxeo.labs.workflowgraph.*`. Only exceptions: the Web UI labels of the
 audit entries, `eventType.lwgWorkflowStepCompleted`, `activity.lwgWorkflowStepCompleted` and `eventCategory.Routing`
 (missing in Web UI, used by every routing event), in the plugin's `messages*.json`.
 
@@ -44,7 +51,8 @@ references again if the Nuxeo hotfix level changed a lot.
 - `Possible Evolutions/LwgWorkflowHistory.md`: one `LwgWorkflowHistory` record per ended workflow (done, canceled,
   or removed while running), captured in the transaction that ends it, readable and purgeable by configured groups,
   drawn by the dialog once the instance is purged. Kept out of the plugin for now: the server side stays light (the
-  recorder only).
+  recorder and the read operation). Written before 2025.3: its references to the client-side audit reading
+  (`_loadHistory`, `LWG.historyFromAudit`) are now `GetWorkflowGraphOperation` / `WorkflowHistory.fromAudit`.
 
 ### Scope (decided with the user, keep it)
 
@@ -84,8 +92,8 @@ references again if the Nuxeo hotfix level changed a lot.
   transitions get `is-taken`: color `--lwg-passed` whatever their palette color, stroke 2.4, `TAKEN_ARROW`, label
   tinted, drawn above the others and below the next ones. **The current look wins**: a current step is never
   `isPassed`, a transition leaving a current step is never `isTaken` (it is `is-next`). Steps only from the history,
-  no count shown (no "xN"), no guessed path: transitions only come from the recorder. Model:
-  `LWG.historyFromAudit(entries, workflowId)` (keeps our event for this workflow, counts) -> `LWG.normalizeHistory`
+  no count shown (no "xN"), no guessed path: transitions only come from the recorder. Model: the operation's
+  `history` (`WorkflowHistory.fromAudit`: keeps our event for this workflow, counts) -> `LWG.normalizeHistory`
   format `{ nodes: [{ id, completed, count }], transitions: [{ source, index, name, target, count }] }`,
   `node.isPassed`, `edge.isTaken`, `edge.sourceIndex` (position in the step counting the ignored transitions,
   matched with the history `index`; a target mismatch is ignored with a warning).
@@ -112,7 +120,7 @@ references again if the Nuxeo hotfix level changed a lot.
   `2025.3.0-SNAPSHOT`, parent `org.nuxeo:nuxeo-parent:2025.24`. Minimum LTS 2025 hotfix: **2025.16**
   (`nuxeo.target.version`, target platform of `package.xml`): the audit `routes` extension point used by
   `lwg-audit-contrib.xml` exists since 2025.16. Do not lower it, nor go back to the deprecated `event` point.
-- Java bundle (`nuxeo.labs.workflowgraph`), the recorder only:
+- Java bundle (`nuxeo.labs.workflowgraph`), the recorder and the read operation:
   - `StepCompletedListener`: synchronous `beforeDocumentModification` listener on `RouteNode` documents. A step
     completes when it is saved with a new `rnode:endDate` (dirty, and different from `PREVIOUS_DOCUMENT_MODEL`):
     the transitions with `result=true` are the followed ones (only the first with
@@ -128,10 +136,17 @@ references again if the Nuxeo hotfix level changed a lot.
     marked rollback-only.
   - Nuxeo does not keep the followed transitions (`result` is reset when the target starts): what happened before
     the installation is unknown, do not try to guess it.
-- Dialog (`nuxeo-labs-workflow-graph-dialog.html`): `_loadHistory` (candidates, never rejects, stale openings
-  ignored) and `_readHistory` (`@audit?eventId=...&pageSize=LWG.HISTORY_PAGE_SIZE&sortBy=eventDate&sortOrder=desc`,
-  page by page, at most `LWG.HISTORY_MAX_PAGES`, the oldest entries are dropped with a warning). The audit cannot
-  filter on extended info: the client filters on `lwgWorkflowId`.
+  - `GetWorkflowGraphOperation` (`LabsWorkflowGraph.GetWorkflowGraph`, `lwg-operations-contrib.xml`, `@since
+    2025.3`): see "Data" above. `readWorkflow` runs in `CoreInstance.doPrivileged` and returns the attached ids
+    internally only (`WorkflowData`); `readHistory` / `canRead` / `queryEntries` use the user's session and the
+    default audit backend (`DEFAULT_AUDIT_BACKEND`), sorted `eventDate desc, id desc`, `limit(MAX_HISTORY_ENTRIES)`.
+    JSON written with a plain Jackson `ObjectMapper` (as `JsonGraphRoute`), returned with `Blobs.createJSONBlob`.
+  - `WorkflowHistory` (record, `Step`, `FollowedTransition`): `fromAudit(entries, workflowId, truncated)`, the Java
+    port of the former client-side reader (sorted by date then id, counts, lists or comma strings, positions as
+    numbers or digits, invalid values ignored).
+- Dialog (`nuxeo-labs-workflow-graph-dialog.html`): `open(workflowId)` -> `_fetch` (a `nuxeo-operation`, a new
+  execution aborts the previous one, stale openings ignored with `_loadCount`) -> `setGraph(graph, { direction,
+  history })`. `_history` only warns (null history, `truncated`). `lwg-override.js` passes the workflow id only.
 - Web files: `nuxeo-labs-workflow-graph-web/src/main/resources/web/nuxeo.war/ui/nuxeo-labs-workflow-graph/`,
   script order in `nuxeo-labs-workflow-graph-bundle.html`: `lwg-core.js`, `vendor/dagre.min.js`, `lwg-layout.js`,
   `lwg-icons.js`, `lwg-styles.js`, `lwg-renderer.js`, the Polymer dialog, `lwg-override.js`.
@@ -149,7 +164,7 @@ references again if the Nuxeo hotfix level changed a lot.
 - Apache 2.0 header `(C) Copyright 2026 Hyland (http://hyland.com/) and others.` with
   `Contributors: <author name> (with the help of opencode/Claude Opus 5.5)` on every new file (Java, JS, HTML, MJS;
   same author as in the existing files).
-- `@since 2025.2` on new files / public API (`@since 2025.1` for what existed in 2025.1).
+- `@since 2025.3` on new files / public API (`@since 2025.1` / `2025.2` for what existed before).
 - JavaScript comments: `//` for 1 to 3 lines, `/* ... */` for 4+ lines or for section separators such as
   `/* ==================== Layout ==================== */`.
 - ~120 characters per line, 2-space indentation in JS/HTML, single quotes, trailing commas.
@@ -185,15 +200,19 @@ built with `RouteNode` documents, steps resumed with `resumeInstance` and a butt
 `TestWorkflowHistory` (keys and values, JSON of the REST API via `MarshallerHelper`, paths, loop, fork/merge, waiting
 merge, several tasks, cancellation, several attached documents, attached document deleted while running, no
 attached document, comment length, `properties()`), `TestWorkflowHistoryWithoutRecorder` (listener disabled by
-`test-recorder-disabled-contrib.xml`).
+`test-recorder-disabled-contrib.xml`), `TestGetWorkflowGraphOperation` (runs the operation with `AutomationService` as
+a given user, `coreFeature.getCoreSession("jdoe")` + `grantRead`: JSON fields, graph equal to
+`JsonGraphRoute.getGraphElementsAsMap`, history, loops, other workflows, reader of the document only, stranger,
+first readable document, deleted document, no document, non-workflow ids -> `DocumentNotFoundException`, locale),
+`TestWorkflowHistoryFromAudit` (plain JUnit, `LogEntry.builder`). Steps get `rnode:taskX/taskY` (required by
+`NodeView`).
 
 Demo: `python3 -m http.server 8765` at the project root, then
 `http://localhost:8765/dev/demo/index.html?wf=large&theme=dark` (`&dir=LR` forces the direction, `&history=off`
 hides the history).
 
 Fixtures: `dev/demo/samples.js` (Serial/Parallel Document Review and MainWF rebuilt from the Nuxeo sources,
-synthetic "contract" and "large" workflows), each with `workflowId`, `documentId` and an `audit`: the `@audit`
-entries the recorder would write (built by `audit(graph, doneIds, [[source, label]])`, one entry per step done, plus
-one entry of another workflow that must be ignored); the demo, the Node tests and `screenshots.mjs` use
-`LWG.historyFromAudit(sample.audit, sample.workflowId)`, as the dialog. Anonymise any real graph before adding it.
+synthetic "contract" and "large" workflows), each with a `history` in the operation's format (built by
+`history(graph, doneIds, [[source, label]])`); the demo, the Node tests and `screenshots.mjs` pass it to `setGraph`,
+as the dialog. The reading of the audit is tested in Java only. Anonymise any real graph before adding it.
 The interaction checks that test the palette colors use `history: 'off'`.

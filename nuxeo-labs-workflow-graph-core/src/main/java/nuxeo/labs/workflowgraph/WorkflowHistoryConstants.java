@@ -20,8 +20,8 @@ package nuxeo.labs.workflowgraph;
 
 /**
  * Names of the event fired by the recorder ({@link StepCompletedListener}) and of its properties. They are also used
- * in {@code OSGI-INF/lwg-audit-contrib.xml}, and read by the graph dialog (Web UI) from the audit of the documents
- * attached to the workflow ({@code GET /api/v1/id/{docId}/@audit}).
+ * in {@code OSGI-INF/lwg-audit-contrib.xml}, and read back from the audit of the documents attached to the workflow
+ * by {@link GetWorkflowGraphOperation} (see {@link WorkflowHistory}).
  * <p>
  * The event properties are stored as audit extended info under the same keys. They are prefixed: in the OpenSearch
  * audit backend, the extended info of every event share one mapping ({@code extended.<key>}), so a generic name

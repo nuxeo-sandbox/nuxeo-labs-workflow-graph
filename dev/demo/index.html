@@ -178,8 +178,8 @@ Contributors:
         await LWG.fontsReady();
         renderer.setGraph(sample.graph, {
           direction: params.get('dir') || LWG.loadDirection(directionKey),
-          // as the dialog does with the audit entries of an attached document
-          history: history === 'on' ? LWG.historyFromAudit(sample.audit, sample.workflowId) : null,
+          // as the dialog does with the history returned by the operation
+          history: history === 'on' ? sample.history : null,
         });
         document.body.dataset.ready = 'true';
       })().catch((e) => {

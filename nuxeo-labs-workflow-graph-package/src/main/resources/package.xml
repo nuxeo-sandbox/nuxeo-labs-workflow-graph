@@ -6,8 +6,8 @@
     automatic layout (top to bottom or left to right), themed cards, current step and its next transitions
     highlighted, steps already done and transitions already followed marked, zoom (buttons, keys, pinch), fit to
     screen and center on the current step. Server side: records the transitions followed by graph workflows (one
-    audit entry on each document attached to the workflow per completed step), read by the graph from the audit of
-    the document.</p>
+    audit entry on each document attached to the workflow per completed step), and returns the workflow, its graph
+    and its history to the graph in one call (operation LabsWorkflowGraph.GetWorkflowGraph).</p>
   </description>
   <vendor>Hyland</vendor>
   <installer restart="true" />

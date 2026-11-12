@@ -1,8 +1,9 @@
 <?xml version="1.0"?>
 <!--
   Audit of the transitions followed by graph workflows: the recorder (lwg-listener-contrib.xml) fires
-  lwgWorkflowStepCompleted on each document attached to the workflow each time a step completes. The readers of a
-  document can read its audit (GET /api/v1/id/{docId}/@audit): the graph dialog reads the history from there.
+  lwgWorkflowStepCompleted on each document attached to the workflow each time a step completes. The operation
+  LabsWorkflowGraph.GetWorkflowGraph (lwg-operations-contrib.xml) reads the history from the audit of an attached
+  document that the user can read.
   The "routes" extension point exists since LTS 2025.16 (minimum version of the package).
 
   @since 2025.2

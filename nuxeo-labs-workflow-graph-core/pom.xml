@@ -10,11 +10,12 @@
   <name>Nuxeo Labs Workflow Graph - Core</name>
   <description>
     Server side of the workflow graph: records the transitions followed by graph workflows (one audit entry on each
-    attached document per completed step), read by the graph dialog from the audit of the document.
+    attached document per completed step), and returns the workflow, its graph and its history to the graph dialog
+    (operation LabsWorkflowGraph.GetWorkflowGraph).
   </description>
 
   <dependencies>
-    <!-- DocumentModel, DocumentModelList -->
+    <!-- DocumentModel, DocumentModelList, CoreInstance, Blobs -->
     <dependency>
       <groupId>org.nuxeo.ecm.core</groupId>
       <artifactId>nuxeo-core-api</artifactId>
@@ -26,7 +27,25 @@
       <artifactId>nuxeo-core-event</artifactId>
       <scope>provided</scope>
     </dependency>
-    <!-- GraphRoute, GraphNode and the routing constants -->
+    <!-- Predicates and orders of the audit query -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.core</groupId>
+      <artifactId>nuxeo-core-query</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- the operation -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.automation</groupId>
+      <artifactId>nuxeo-automation-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- AuditService, AuditQueryBuilder, LogEntry (the history read by the operation) -->
+    <dependency>
+      <groupId>org.nuxeo.ecm.platform</groupId>
+      <artifactId>nuxeo-platform-audit-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- GraphRoute, GraphNode, JsonGraphRoute and the routing constants -->
     <dependency>
       <groupId>org.nuxeo.ecm.routing</groupId>
       <artifactId>nuxeo-routing-api</artifactId>
@@ -65,6 +84,12 @@
       <artifactId>commons-lang3</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- JSON of the operation -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>provided</scope>
+    </dependency>
 
     <!-- Tests -->
     <dependency>
@@ -77,22 +102,10 @@
       <artifactId>nuxeo-core-test</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- Predicates of the audit queries of the tests -->
-    <dependency>
-      <groupId>org.nuxeo.ecm.core</groupId>
-      <artifactId>nuxeo-core-query</artifactId>
-      <scope>test</scope>
-    </dependency>
     <!-- the workflow engine runs automation chains -->
     <dependency>
       <groupId>org.nuxeo.ecm.automation</groupId>
       <artifactId>nuxeo-automation-test</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <!-- AuditService, AuditQueryBuilder, LogEntry -->
-    <dependency>
-      <groupId>org.nuxeo.ecm.platform</groupId>
-      <artifactId>nuxeo-platform-audit-core</artifactId>
       <scope>test</scope>
     </dependency>
     <!-- AuditFeature (in-memory audit backend by default) -->
@@ -110,11 +123,6 @@
     <dependency>
       <groupId>org.nuxeo.ecm.platform</groupId>
       <artifactId>nuxeo-platform-content-template-manager</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>

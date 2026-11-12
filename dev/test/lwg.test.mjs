@@ -93,8 +93,12 @@ test('every fallback message is in both translation files, and the reverse (plus
   assert.deepEqual(Object.keys(fr).sort(), keys);
   Object.keys(LWG.FALLBACK_MESSAGES).forEach((k) => assert.equal(en[k], LWG.FALLBACK_MESSAGES[k], k));
   AUDIT_LABEL_KEYS.forEach((k) => assert.ok(en[k] && fr[k], k));
-  // the event of the labels is the one read by the dialog
-  assert.ok(AUDIT_LABEL_KEYS.includes(`eventType.${LWG.HISTORY_EVENT}`));
+  // the event of the labels is the one of the recorder (server side)
+  const javaDir = path.join(projectDir, 'nuxeo-labs-workflow-graph-core/src/main/java/nuxeo/labs/workflowgraph');
+  const constants = fs.readFileSync(path.join(javaDir, 'WorkflowHistoryConstants.java'), 'utf8');
+  const event = /STEP_COMPLETED_EVENT = "([^"]+)"/.exec(constants)[1];
+  assert.ok(AUDIT_LABEL_KEYS.includes(`eventType.${event}`), event);
+  assert.ok(AUDIT_LABEL_KEYS.includes(`activity.${event}`), event);
 });
 
 test('translateLabel: client translation, readable snake_case keys, empty values', () => {
@@ -173,8 +177,9 @@ test('buildModel: transition colors by rank in their step, neutral when the step
 
 /* ==================== History ==================== */
 
-// History of a sample, as the dialog builds it from the audit entries of an attached document
-const historyOf = (sample) => LWG.historyFromAudit(sample.audit, sample.workflowId);
+// History of a sample, in the format returned by the operation LabsWorkflowGraph.GetWorkflowGraph (built by the
+// server from the audit entries of the recorder, tested in Java)
+const historyOf = (sample) => sample.history;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
 test('normalizeHistory: object or JSON string, invalid entries dropped, null when not a history', () => {
@@ -205,94 +210,14 @@ test('normalizeHistory: object or JSON string, invalid entries dropped, null whe
   }
 });
 
-test('historyFromAudit: entries of the event for the workflow only, counts, invalid values ignored', () => {
-  const entry = (id, date, extended, eventId) => ({
-    id,
-    eventId: eventId || LWG.HISTORY_EVENT,
-    eventDate: date,
-    extended: Object.assign({ lwgWorkflowId: 'wf' }, extended),
-  });
-  const entries = [
-    // most recent first, as read by the dialog
-    entry(4, '2026-01-05T09:04:00.000Z', {
-      lwgNodeId: 'review',
-      lwgTransitions: [1],
-      lwgTransitionNames: ['validate'],
-      lwgTargets: ['end'],
-    }),
-    entry(3, '2026-01-05T09:03:00.000Z', {
-      lwgNodeId: 'review',
-      lwgTransitions: [0],
-      lwgTransitionNames: ['reject'],
-      lwgTargets: ['review'],
-    }),
-    entry(2, '2026-01-05T09:02:00.000Z', {
-      lwgNodeId: 'review',
-      lwgTransitions: ['0'],
-      lwgTransitionNames: ['reject'],
-      lwgTargets: ['review'],
-    }),
-    // a fork: both transitions, positions as a comma-separated string, target unknown
-    entry(1, '2026-01-05T09:01:00.000Z', { lwgNodeId: 'start', lwgTransitions: '0, 1', lwgTargets: ['a', ''] }),
-    // an end step
-    entry(5, '2026-01-05T09:05:00.000Z', { lwgNodeId: 'end', lwgTransitions: [] }),
-    // ignored: another workflow, another event, no step, invalid positions
-    entry(6, '2026-01-05T09:06:00.000Z', { lwgWorkflowId: 'other', lwgNodeId: 'x', lwgTransitions: [0] }),
-    entry(7, '2026-01-05T09:07:00.000Z', { lwgNodeId: 'y', lwgTransitions: [0] }, 'documentModified'),
-    entry(8, '2026-01-05T09:08:00.000Z', { lwgNodeId: '', lwgTransitions: [0] }),
-    entry(9, '2026-01-05T09:09:00.000Z', { lwgNodeId: 'bad', lwgTransitions: [-1, 1.5, 'x', null] }),
-    null,
-    { eventId: LWG.HISTORY_EVENT },
-  ];
-  assert.deepEqual(plain(LWG.historyFromAudit(entries, 'wf')), {
-    nodes: [
-      { id: 'start', completed: true, count: 1 },
-      { id: 'review', completed: true, count: 3 },
-      { id: 'end', completed: true, count: 1 },
-      { id: 'bad', completed: true, count: 1 },
-    ],
-    transitions: [
-      { source: 'start', index: 0, name: null, target: 'a', count: 1 },
-      { source: 'start', index: 1, name: null, target: null, count: 1 },
-      { source: 'review', index: 0, name: 'reject', target: 'review', count: 2 },
-      { source: 'review', index: 1, name: 'validate', target: 'end', count: 1 },
-    ],
-  });
-  // usable by normalizeHistory and buildModel
-  assert.ok(LWG.normalizeHistory(LWG.historyFromAudit(entries, 'wf')));
-  for (const [list, id] of [[entries, null], [entries, ''], [null, 'wf'], ['not a list', 'wf'], [[], 'wf']]) {
-    assert.deepEqual(plain(LWG.historyFromAudit(list, id)), { nodes: [], transitions: [] });
-  }
-});
-
-test('documentIdsOf: ids, documents and references, in order, without duplicates', () => {
-  const ids = LWG.documentIdsOf(
-    { 'entity-type': 'document', uid: 'doc1' },
-    [{ id: 'doc2' }, { uid: 'doc1' }, ' doc3 '],
-    [[{ id: 'doc4' }]],
-    null,
-    undefined,
-    '',
-    42,
-    { id: 7 },
-    {},
-  );
-  assert.deepEqual(plain(ids), ['doc1', 'doc2', 'doc3', 'doc4']);
-  assert.deepEqual(plain(LWG.documentIdsOf()), []);
-});
-
-test('samples: the audit entries of another workflow are ignored', () => {
+test('samples: histories in the format of the operation, kept whole by normalizeHistory', () => {
   for (const [name, sample] of Object.entries(samples)) {
-    const others = sample.audit.filter((e) => e.extended.lwgWorkflowId !== sample.workflowId);
-    assert.equal(others.length, 1, name);
     const history = historyOf(sample);
-    const [other] = others;
-    assert.ok(
-      !history.transitions.some(
-        (t) => t.source === other.extended.lwgNodeId && t.index === other.extended.lwgTransitions[0],
-      ),
-      name,
-    );
+    assert.equal(history.truncated, false, name);
+    const normalized = LWG.normalizeHistory(history);
+    assert.equal(normalized.nodes.length, history.nodes.length, name);
+    assert.equal(normalized.transitions.length, history.transitions.length, name);
+    assert.ok(normalized.nodes.every((n) => n.completed && n.count === 1), name);
   }
 });
 
@@ -467,16 +392,21 @@ test('buildModel with a history: dimmed = never reached (current, started, waiti
 test('buildModel with a history: incomplete (start step not recorded) marks what is known, dims nothing', () => {
   // serial: the workflow started before the installation, only the rejection of the current step was recorded
   const graph = samples.serial.graph;
-  const entries = samples.serial.audit.filter((e) => e.extended.lwgNodeId === 'Task6d8');
-  const partial = LWG.buildModel(graph, { history: LWG.historyFromAudit(entries, samples.serial.workflowId) });
+  const full = historyOf(samples.serial);
+  const partialHistory = {
+    nodes: full.nodes.filter((n) => n.id === 'Task6d8'),
+    transitions: full.transitions.filter((t) => t.source === 'Task6d8'),
+  };
+  const partial = LWG.buildModel(graph, { history: partialHistory });
   assert.equal(partial.hasHistory, true);
   assert.equal(partial.historyComplete, false);
   assert.ok(partial.nodes.every((n) => !n.isDimmed) && partial.edges.every((e) => !e.isDimmed));
   // nothing else is known: Start and Choose Participants are not marked done
   assert.deepEqual(Array.from(partial.nodes.filter((n) => n.isPassed)), []);
 
-  // no entry at all (the audit of the document was read): same
-  const empty = LWG.buildModel(graph, { history: LWG.historyFromAudit([], samples.serial.workflowId) });
+  // nothing recorded at all (an attached document could be read): same
+  const nothing = { nodes: [], transitions: [], truncated: false };
+  const empty = LWG.buildModel(graph, { history: nothing });
   assert.equal(empty.historyComplete, false);
   assert.ok(empty.nodes.every((n) => !n.isDimmed && !n.isPassed) && empty.edges.every((e) => !e.isDimmed));
 
@@ -492,7 +422,7 @@ test('buildModel with a history: incomplete (start step not recorded) marks what
       { nodeSourceId: 'x', nodeTargetId: 'y', label: 'end' },
     ],
   };
-  const fresh = LWG.buildModel(atStart, { history: LWG.historyFromAudit([], 'w') });
+  const fresh = LWG.buildModel(atStart, { history: nothing });
   assert.equal(fresh.historyComplete, true);
   // everything can still happen
   assert.ok(fresh.nodes.every((n) => !n.isDimmed) && fresh.edges.every((e) => !e.isDimmed));

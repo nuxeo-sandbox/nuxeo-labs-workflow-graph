@@ -22,21 +22,20 @@ Contributors:
   (LWG.Renderer). Created by lwg-override.js inside Web UI's nuxeo-workflow-graph element, where the default
   dialog lives, so it behaves the same way (stacking, notifications, theme).
 
-    dialog.open(workflowId, { documentIds }) returns a promise. documentIds (optional): documents attached to the
-    workflow known by the caller, whose audit holds the history. When the graph cannot be fetched, the dialog
-    closes and shows Web UI's usual error message. When it cannot be drawn, the dialog closes and the promise
-    rejects with error.lwgFallback = true, so the caller can open Web UI's default graph instead.
+    dialog.open(workflowId) returns a promise. When the graph cannot be fetched, the dialog closes and shows Web UI's
+    usual error message. When it cannot be drawn, the dialog closes and the promise rejects with
+    error.lwgFallback = true, so the caller can open Web UI's default graph instead.
 
-  Data, requested in parallel (the graph is drawn once all have answered):
-    GET /api/v1/workflow/{id}/graph   the graph (required)
-    GET /api/v1/workflow/{id}         the title, the model name and the attached documents (optional: "Workflow" is
-                                      displayed if it cannot be read, and the direction is then kept for this
-                                      instance only)
-    GET /api/v1/id/{docId}/@audit     the history: steps already done and transitions already followed (optional,
-                                      @since 2025.2). Written by the recorder of the plugin (server side) on each
-                                      attached document, readable by the readers of the document. The documents
-                                      given by the caller are tried first, then the attached documents of the
-                                      workflow; without a readable one, no history is shown.
+  Data: one call to the operation LabsWorkflowGraph.GetWorkflowGraph (server side of the plugin, @since 2025.3),
+  which returns:
+    workflow   id, name, title, state and workflowModelName, as GET /api/v1/workflow/{id} (the title of the dialog,
+               and the model name under which the direction is kept). Read by the server for every user who can
+               open the graph, also the readers of the documents who cannot read the workflow instance.
+    graph      nodes and transitions, as GET /api/v1/workflow/{id}/graph.
+    history    steps already done and transitions already followed (see LWG.normalizeHistory), read from the audit of
+               the first attached document that the user can read, or null (no readable document, or the audit
+               cannot be read): the graph is then drawn without the history.
+  The labels translated by the server use the language of Web UI.
 
   Direction: top to bottom by default. The direction chosen in the toolbar (or with the Down / Right arrow keys)
   is kept in the browser (localStorage), per workflow model, see LWG.directionStorageKey.
@@ -158,14 +157,8 @@ Contributors:
       }
     </style>
 
-    <nuxeo-resource
-      id="graphResource"
-      path="/workflow/[[workflowId]]/graph"
-      headers='{"Content-Type": "application/json"}'
-    ></nuxeo-resource>
-    <nuxeo-resource id="workflowResource" path="/workflow/[[workflowId]]"></nuxeo-resource>
-    <!-- path and params set for each request, see _readHistory -->
-    <nuxeo-resource id="auditResource"></nuxeo-resource>
+    <!-- params set for each opening, see _fetch; a new execution aborts the previous one -->
+    <nuxeo-operation id="graphOperation" op="LabsWorkflowGraph.GetWorkflowGraph"></nuxeo-operation>
 
     <nuxeo-dialog
       id="dialog"
@@ -207,7 +200,7 @@ Contributors:
 
       const LWG = window.NuxeoLabs.WorkflowGraph;
 
-      // nuxeo-resource rejects with plain objects ({ status, message }): returns an Error carrying the flags.
+      // A failed request may reject with a plain object ({ status, message }): returns an Error carrying the flags.
       function errorWith(flags, cause) {
         const error = cause instanceof Error ? cause : new Error((cause && cause.message) || String(cause));
         Object.assign(error, flags);
@@ -215,6 +208,13 @@ Contributors:
           error.cause = cause;
         }
         return error;
+      }
+
+      // Language of Web UI ("fr-FR"...), used by the server to translate the labels, null when unknown.
+      function webUiLanguage() {
+        const i18n = window.nuxeo && window.nuxeo.I18n;
+        const language = i18n && typeof i18n.language === 'string' ? i18n.language.trim() : '';
+        return language || null;
       }
 
       Polymer({
@@ -226,7 +226,7 @@ Contributors:
             type: String,
           },
 
-          // The workflow entity (GET /workflow/{id}), null until loaded or if it cannot be read.
+          // The workflow (id, name, title, state, workflowModelName), null until loaded.
           workflow: {
             type: Object,
             value: null,
@@ -246,9 +246,8 @@ Contributors:
          * Opens the dialog and loads the graph. Resolves when the graph is drawn. Rejects (after closing the
          * dialog) when the graph cannot be fetched (Web UI's error message is shown) or drawn (error.lwgFallback).
          * An opening replaced by a newer one resolves without doing anything.
-         * options: { documentIds: ids (or document entities) of documents attached to the workflow, optional }
          */
-        open(workflowId, options) {
+        open(workflowId) {
           let renderer;
           try {
             renderer = this._ensureRenderer();
@@ -266,43 +265,21 @@ Contributors:
             dialog.open();
           }
 
-          // The workflow entity gives the title and the model name, under which the direction chosen by the user
-          // is kept: the graph waits for it (both requests run in parallel). It is optional.
-          const workflowLoaded = this.$.workflowResource
-            .get()
-            .then((workflow) => {
-              const entity = workflow && workflow['entity-type'] === 'workflow' ? workflow : null;
-              if (!isStale()) {
-                this.workflow = entity;
-              }
-              return entity;
-            })
-            .catch((e) => {
-              console.warn(LWG.LOG_PREFIX, 'Cannot read the workflow:', (e && (e.status || e.message)) || e);
-              return null;
-            });
-          // The history (steps already done, transitions already followed) is optional as well.
-          const hints = LWG.documentIdsOf((options && options.documentIds) || []);
-          const historyLoaded = this._loadHistory(workflowId, hints, workflowLoaded, isStale);
-
-          return Promise.all([this.$.graphResource.get(), LWG.fontsReady()])
+          return Promise.all([this._fetch(workflowId), LWG.fontsReady()])
             .catch((e) => {
               throw errorWith({ lwgGraphError: true }, e);
             })
-            .then(([graph]) =>
-              Promise.all([workflowLoaded, historyLoaded]).then(([workflow, history]) => ({
-                graph,
-                workflow,
-                history,
-              })),
-            )
-            .then(({ graph, workflow, history }) => {
+            .then(([data]) => {
               if (isStale()) {
                 return;
               }
+              const graph = data && data.graph;
               if (!graph || !Array.isArray(graph.nodes)) {
                 throw errorWith({ lwgGraphError: true }, new Error('Invalid workflow graph response'));
               }
+              const workflow = data.workflow && typeof data.workflow === 'object' ? data.workflow : null;
+              this.workflow = workflow;
+              const history = this._history(data.history);
               this._directionKey = LWG.directionStorageKey(workflow, workflowId);
               try {
                 renderer.setGraph(graph, { direction: LWG.loadDirection(this._directionKey), history });
@@ -312,6 +289,7 @@ Contributors:
               this.loading = false;
             })
             .catch((error) => {
+              // a newer opening aborts the request
               if (isStale()) {
                 return;
               }
@@ -328,93 +306,28 @@ Contributors:
           this.$.dialog.close();
         },
 
-        /*
-         * History of the workflow, read from the audit of an attached document (see LWG.historyFromAudit): the
-         * documents given by the caller first, then the attached documents of the workflow entity. A document that
-         * cannot be read (403, 404) is skipped. Resolves to null (never rejects) when no document can be read or
-         * when a newer opening replaced this one.
-         */
-        async _loadHistory(workflowId, hints, workflowLoaded, isStale) {
-          const tried = new Set();
-          const attempt = async (ids) => {
-            for (const docId of ids) {
-              if (isStale()) {
-                return null;
-              }
-              if (tried.has(docId)) {
-                continue;
-              }
-              tried.add(docId);
-              try {
-                const history = await this._readHistory(docId, workflowId, isStale);
-                return isStale() ? null : history;
-              } catch (e) {
-                // a newer opening aborts the request
-                if (isStale()) {
-                  return null;
-                }
-                const status = e && (e.status || (e.response && e.response.status));
-                // 403, 404: the user cannot read this document, or it was deleted
-                if (status !== 403 && status !== 404) {
-                  console.warn(LWG.LOG_PREFIX, `Cannot read the audit of ${docId}:`, status || (e && e.message) || e);
-                }
-              }
-            }
-            return null;
-          };
-          try {
-            let history = await attempt(hints);
-            if (!history && !isStale()) {
-              const workflow = await workflowLoaded;
-              history = await attempt(LWG.documentIdsOf((workflow && workflow.attachedDocumentIds) || []));
-            }
-            if (!history && !isStale()) {
-              console.warn(LWG.LOG_PREFIX, 'No attached document can be read: the workflow history is not shown');
-            }
-            return history;
-          } catch (e) {
-            if (!isStale()) {
-              console.warn(LWG.LOG_PREFIX, 'Cannot read the workflow history:', e);
-            }
-            return null;
+        // Calls LabsWorkflowGraph.GetWorkflowGraph: { workflow, graph, history }.
+        _fetch(workflowId) {
+          const operation = this.$.graphOperation;
+          const params = { workflowId };
+          const language = webUiLanguage();
+          if (language) {
+            params.language = language;
           }
+          operation.params = params;
+          return operation.execute();
         },
 
-        /*
-         * Reads the audit entries of the recorder on a document, most recent first, page by page (at most
-         * LWG.HISTORY_MAX_PAGES pages), and returns the history of the workflow. Throws when the audit cannot be
-         * read (e.g. { status: 403 }).
-         */
-        async _readHistory(docId, workflowId, isStale) {
-          const resource = this.$.auditResource;
-          const entries = [];
-          for (let page = 0; page < LWG.HISTORY_MAX_PAGES; page++) {
-            resource.path = `/id/${encodeURIComponent(docId)}/@audit`;
-            resource.params = {
-              eventId: LWG.HISTORY_EVENT,
-              pageSize: LWG.HISTORY_PAGE_SIZE,
-              currentPageIndex: page,
-              sortBy: 'eventDate',
-              sortOrder: 'desc',
-            };
-            // one page at a time: the next request depends on this one
-            const response = await resource.get();
-            if (isStale()) {
-              return null;
-            }
-            if (!response || !Array.isArray(response.entries)) {
-              throw new Error('Invalid audit response');
-            }
-            entries.push(...response.entries);
-            if (!response.isNextPageAvailable) {
-              return LWG.historyFromAudit(entries, workflowId);
-            }
+        // The history to draw (see LWG.normalizeHistory), null when the server could not read it.
+        _history(history) {
+          if (!history) {
+            console.warn(LWG.LOG_PREFIX, 'No workflow history: no attached document can be read (see the server log)');
+            return null;
           }
-          console.warn(
-            LWG.LOG_PREFIX,
-            `More than ${entries.length} workflow history entries on ${docId}, the oldest ones are ignored`,
-          );
-          return LWG.historyFromAudit(entries, workflowId);
+          if (history.truncated) {
+            console.warn(LWG.LOG_PREFIX, 'Too many workflow history entries, the oldest ones are ignored');
+          }
+          return history;
         },
 
         _ensureRenderer() {

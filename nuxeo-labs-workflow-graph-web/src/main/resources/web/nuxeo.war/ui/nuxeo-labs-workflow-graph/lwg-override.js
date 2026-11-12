@@ -24,7 +24,8 @@
  * only call its show() method. Redefining the element is not possible (customElements.define would throw), so
  * its show() is patched once the element is defined: show() opens nuxeo-labs-workflow-graph-dialog, created
  * inside the element's shadow root; if the dialog is not available or the graph cannot be drawn, the original
- * show() is called. No Web UI file is modified.
+ * show() is called. No Web UI file is modified. Only the workflow id of the element is used: the dialog gets
+ * everything else from the server.
  *
  * @since 2025.1
  */
@@ -54,25 +55,6 @@
     return typeof dialog.open === 'function' ? dialog : null;
   }
 
-  /*
-   * Documents attached to the workflow, known by the Web UI element that contains the graph: the document workflow
-   * bar (nuxeo-document-info-bar) has the document, the task view (nuxeo-document-task) has the task and its target
-   * documents. Their audit holds the history (@since 2025.2). Returns [] when nothing is found: the dialog then
-   * uses the attached documents of the workflow entity.
-   */
-  function documentHints(host) {
-    try {
-      const rootNode = host.getRootNode && host.getRootNode();
-      const owner = rootNode && rootNode.host;
-      if (!owner) {
-        return [];
-      }
-      return LWG.documentIdsOf(owner.document, owner.task && owner.task.targetDocumentIds);
-    } catch (e) {
-      return [];
-    }
-  }
-
   function createShow(originalShow) {
     const show = function (...args) {
       const dialog = getDialog(this);
@@ -80,7 +62,7 @@
         console.warn(LWG.LOG_PREFIX, 'The graph dialog is not available, using the default graph');
         return originalShow.apply(this, args);
       }
-      return dialog.open(this.workflowId, { documentIds: documentHints(this) }).catch((error) => {
+      return dialog.open(this.workflowId).catch((error) => {
         if (error && error.lwgFallback) {
           console.warn(LWG.LOG_PREFIX, 'The graph cannot be drawn, using the default graph', error.cause || error);
           return originalShow.apply(this, args);
