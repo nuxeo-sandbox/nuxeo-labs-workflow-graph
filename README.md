@@ -16,6 +16,7 @@ An alternative for the **"View Graph"** dialog of Nuxeo Web UI (Nuxeo LTS 2025):
   * Center on the current step
   * Direction of the layout.
 * Colors can be changed with CSS
+* Handling the history of a workflow (so, the graph can dim transitions and nodes not followed) requires to add entries to the audit: This can be disabled (see #server-side)
 
 ![The graph in the Web UI dialog](README-Images/serial-review-2-fit.png)
 
