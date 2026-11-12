@@ -68,6 +68,9 @@ one left to right, and every instance of a model (e.g. every "Serial Document Re
 
 The plugin has two parts: a new graph dialog **in the browser**, and a small history recorder **on the server**.
 
+> [!TIP]
+> For technical details (flow, implementation), see documentation at [docs](docs).
+
 ### When the user clicks "View Graph"
 
 ![What happens when the user clicks View Graph](README-Images/flow-view-graph.svg)
