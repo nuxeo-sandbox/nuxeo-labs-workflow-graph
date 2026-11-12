@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1148 292" width="1148" height="292" role="img"
+  aria-labelledby="title desc">
+  <title id="title">How the history is recorded</title>
+  <desc id="desc">A task is completed, Nuxeo moves to the next step but does not keep the path it took, the plugin
+    records the step and the transitions followed, saved in the audit of each document of the workflow, and the graph
+    reads it later for anyone who can read the document. Only what happens after the installation of the plugin can be
+    shown.</desc>
+  <style><![CDATA[
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      fill: #1f2937; font-size: 14.5px; }
+    .t { font-weight: 650; font-size: 17px; }
+    .s { fill: #5b6474; }
+    .c { text-anchor: middle; }
+    .b { font-weight: 700; }
+    .bg { fill: #f7f8fa; stroke: #d3d9e2; stroke-width: 1; }
+    .plugin { fill: #e1f4f1; stroke: #0d9488; stroke-width: 1.6; }
+    .native { fill: #eef2f7; stroke: #64748b; stroke-width: 1.6; }
+    .store { fill: #fff3dc; stroke: #d97706; stroke-width: 1.6; }
+    .note { fill: #fff3dc; }
+    .note-bar { fill: #d97706; }
+    .ar { fill: none; stroke: #334155; stroke-width: 2; }
+    .num circle { fill: #1f2937; }
+    .num text { fill: #ffffff; font-size: 13px; font-weight: 700; text-anchor: middle; }
+    .lg { font-size: 13.5px; fill: #5b6474; }
+  ]]></style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#334155" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0.5" y="0.5" width="1147" height="291" rx="16"/>
+
+  <g transform="translate(14,14)">
+    <!-- 1 -->
+    <rect class="native" x="10" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="32" cy="42" r="13"/><text x="32" y="46.5">1</text></g>
+    <text class="t c" x="106" y="70">A task is</text>
+    <text class="t c" x="106" y="92">completed</text>
+    <text class="s c" x="106" y="118">e.g. "Approve",</text>
+    <text class="s c" x="106" y="137">or an automatic step</text>
+    <path class="ar" d="M202,85 H235" marker-end="url(#a)"/>
+
+    <!-- 2 -->
+    <rect class="native" x="237" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="259" cy="42" r="13"/><text x="259" y="46.5">2</text></g>
+    <text class="t c" x="333" y="70">Nuxeo moves</text>
+    <text class="t c" x="333" y="92">to the next step</text>
+    <text class="s c" x="333" y="118">but does not keep</text>
+    <text class="s c" x="333" y="137">the path it took</text>
+    <path class="ar" d="M429,85 H462" marker-end="url(#a)"/>
+
+    <!-- 3 -->
+    <rect class="plugin" x="464" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="486" cy="42" r="13"/><text x="486" y="46.5">3</text></g>
+    <text class="t c" x="560" y="70">The plugin</text>
+    <text class="t c" x="560" y="92">records it</text>
+    <text class="s c" x="560" y="118">the step done and</text>
+    <text class="s c" x="560" y="137">the transitions followed</text>
+    <path class="ar" d="M656,85 H689" marker-end="url(#a)"/>
+
+    <!-- 4 -->
+    <rect class="store" x="691" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="713" cy="42" r="13"/><text x="713" y="46.5">4</text></g>
+    <text class="t c" x="787" y="70">Saved in</text>
+    <text class="t c" x="787" y="92">the audit</text>
+    <text class="s c" x="787" y="118">of each document</text>
+    <text class="s c" x="787" y="137">of the workflow</text>
+    <path class="ar" d="M883,85 H916" marker-end="url(#a)"/>
+
+    <!-- 5 -->
+    <rect class="plugin" x="918" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="940" cy="42" r="13"/><text x="940" y="46.5">5</text></g>
+    <text class="t c" x="1014" y="70">The graph</text>
+    <text class="t c" x="1014" y="92">reads it later</text>
+    <text class="s c" x="1014" y="118">for anyone who can</text>
+    <text class="s c" x="1014" y="137">read the document</text>
+
+    <!-- note -->
+    <rect class="note" x="10" y="172" width="1100" height="56" rx="10"/>
+    <rect class="note-bar" x="10" y="172" width="5" height="56" rx="2"/>
+    <text x="32" y="196"><tspan class="b">Only what happens after the plugin is installed can be shown.</tspan></text>
+    <text class="s" x="32" y="216">For older workflows, the graph marks what it knows and does not guess the rest.</text>
+
+    <!-- legend -->
+    <rect class="plugin" x="10" y="246" width="15" height="15" rx="3"/>
+    <text class="lg" x="33" y="258">the plugin (server or browser)</text>
+    <rect class="native" x="250" y="246" width="15" height="15" rx="3"/>
+    <text class="lg" x="273" y="258">Nuxeo / Web UI</text>
+    <rect class="store" x="410" y="246" width="15" height="15" rx="3"/>
+    <text class="lg" x="433" y="258">stored data</text>
+  </g>
+</svg>

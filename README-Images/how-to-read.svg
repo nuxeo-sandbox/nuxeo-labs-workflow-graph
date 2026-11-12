@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1034 542" width="1034" height="542" role="img"
+  aria-labelledby="title desc">
+  <title id="title">How to read the graph</title>
+  <desc id="desc">Example: Start and Review are done (check badge), the approve transition was followed (teal), Sign is
+    the current step (ring and CURRENT badge) and its transition to End is the next one (thicker). Rework, reached by
+    the reject transition, was not done and can no longer happen: it is faded. Legend: current step, step done, path
+    already taken, possible next paths, transition colors, faded branches, and the view controls.</desc>
+  <style><![CDATA[
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      fill: #1f2937; font-size: 14px; }
+    .t { font-weight: 650; font-size: 16.5px; }
+    .n { font-weight: 600; font-size: 15px; }
+    .s { fill: #5b6474; }
+    .c { text-anchor: middle; }
+    .lab { font-size: 12px; text-anchor: middle; }
+    .bg { fill: #f7f8fa; stroke: #d3d9e2; stroke-width: 1; }
+    .canvas { fill: #f1f3f6; }
+    .panel { fill: none; stroke: #aab3c0; stroke-width: 1.5; stroke-dasharray: 8 5; }
+    .ptitle { font-weight: 700; font-size: 14px; fill: #5b6474; letter-spacing: 0.04em; }
+    .inner { fill: #ffffff; stroke: #d3d9e2; stroke-width: 1.2; }
+    .native { fill: #eef2f7; stroke: #64748b; stroke-width: 1.6; }
+    .card { fill: #ffffff; stroke: #d3d9e2; stroke-width: 1.3; }
+    .card-pass { stroke: #0d9488; stroke-width: 2; }
+    .card-cur { stroke: #0066ff; stroke-width: 2; }
+    .ring { fill: none; stroke: #0066ff; stroke-opacity: 0.22; stroke-width: 6; }
+    .dim { opacity: 0.4; }
+    .dim-edge { opacity: 0.32; }
+    .e-taken { fill: none; stroke: #0d9488; stroke-width: 2.4; }
+    .e-next { fill: none; stroke: #0066ff; stroke-width: 3; }
+    .e-tc1 { fill: none; stroke: #16a34a; stroke-width: 1.6; }
+    .e-tc2 { fill: none; stroke: #ea580c; stroke-width: 1.6; }
+    .e-neutral { fill: none; stroke: #9aa1ad; stroke-width: 1.6; }
+    .lab-taken { fill: #ddf0ee; stroke: #0d9488; stroke-width: 1.2; }
+    .lab-next { fill: #dbe9ff; stroke: #0066ff; stroke-width: 1.5; }
+    .lab-tc2 { fill: #fcebe2; stroke: #ea580c; stroke-width: 1.2; }
+    .badge-cur { fill: #d6e6ff; stroke: #66a3ff; stroke-width: 1; }
+    .badge-txt { fill: #0066ff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-anchor: middle; }
+    .check { fill: #0d9488; stroke: #ffffff; stroke-width: 2; }
+    .check-mark { fill: none; stroke: #ffffff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .cap { fill: #5b6474; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; }
+    .k-start { fill: #1f9d63; }
+    .k-step { fill: #3b7ff5; }
+    .k-end { fill: #e5484d; }
+  ]]></style>
+  <defs>
+    <marker id="a-cur" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="14" markerHeight="14"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#0066ff" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="a-pass" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="11" markerHeight="11"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#0d9488" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="a-edge" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#9aa1ad" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="a-tc1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#16a34a" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="a-tc2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#ea580c" d="M0,0 L10,5 L0,10 z"/></marker>
+    <pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="1" fill="#cfd5de"/>
+    </pattern>
+    <filter id="gray"><feColorMatrix type="saturate" values="0.3"/></filter>
+  </defs>
+  <rect class="bg" x="0.5" y="0.5" width="1033" height="541" rx="16"/>
+
+  <g transform="translate(14,14)">
+    <!-- ==================== Example ==================== -->
+    <rect class="canvas" x="10" y="10" width="452" height="504" rx="14"/>
+    <rect x="10" y="10" width="452" height="504" rx="14" fill="url(#dots)"/>
+    <rect class="panel" x="10" y="10" width="452" height="504" rx="14"/>
+    <text class="ptitle" x="28" y="38">EXAMPLE</text>
+    <text class="s" x="106" y="38">Review done, now waiting on Sign</text>
+
+    <g transform="translate(0,40)">
+      <!-- transitions -->
+      <g class="dim-edge" filter="url(#gray)">
+        <path class="e-neutral" d="M390,314 C390,372 320,409 262,409" marker-end="url(#a-edge)"/>
+        <path class="e-tc2" d="M275,166 C330,166 390,200 390,260" marker-end="url(#a-tc2)"/>
+        <rect class="lab-tc2" x="326" y="180" width="54" height="20" rx="10"/>
+        <text class="lab" x="353" y="194.5">reject</text>
+      </g>
+      <path class="e-taken" d="M205,96 V139" marker-end="url(#a-pass)"/>
+      <path class="e-taken" d="M205,192 V261" marker-end="url(#a-pass)"/>
+      <rect class="lab-taken" x="169" y="216" width="72" height="20" rx="10"/>
+      <text class="lab" x="205" y="230.5">approve</text>
+      <path class="e-next" d="M205,314 V391" marker-end="url(#a-cur)"/>
+      <rect class="lab-next" x="177" y="342" width="56" height="20" rx="10"/>
+      <text class="lab" x="205" y="356.5" font-weight="700">sign</text>
+
+      <!-- steps -->
+      <rect class="card card-pass" x="150" y="62" width="110" height="34" rx="17"/>
+      <circle class="k-start" cx="172" cy="79" r="7"/>
+      <text class="n" x="186" y="84.5">Start</text>
+      <circle class="check" cx="258" cy="64" r="10"/>
+      <path class="check-mark" d="M253.5,64.5 l3,3 l5.5,-6.5"/>
+
+      <rect class="card card-pass" x="135" y="140" width="140" height="52" rx="10"/>
+      <circle class="k-step" cx="155" cy="166" r="8"/>
+      <text class="cap" x="172" y="161">STEP</text>
+      <text class="n" x="172" y="179">Review</text>
+      <circle class="check" cx="273" cy="142" r="10"/>
+      <path class="check-mark" d="M268.5,142.5 l3,3 l5.5,-6.5"/>
+
+      <rect class="ring" x="132" y="259" width="146" height="58" rx="13"/>
+      <rect class="card card-cur" x="135" y="262" width="140" height="52" rx="10"/>
+      <circle class="k-step" cx="155" cy="288" r="8"/>
+      <text class="cap" x="172" y="283">STEP</text>
+      <text class="n" x="172" y="301">Sign</text>
+      <rect class="badge-cur" x="208" y="252" width="74" height="20" rx="10"/>
+      <text class="badge-txt" x="245" y="265.5">CURRENT</text>
+
+      <g class="dim" filter="url(#gray)">
+        <rect class="card" x="330" y="262" width="120" height="52" rx="10"/>
+        <circle class="k-step" cx="350" cy="288" r="8"/>
+        <text class="cap" x="367" y="283">STEP</text>
+        <text class="n" x="367" y="301">Rework</text>
+      </g>
+
+      <rect class="card" x="150" y="392" width="110" height="34" rx="17"/>
+      <circle class="k-end" cx="172" cy="409" r="7"/>
+      <text class="n" x="186" y="414.5">End</text>
+    </g>
+
+    <!-- ==================== Legend ==================== -->
+    <text class="t" x="486" y="34">How to read it</text>
+
+    <rect class="inner" x="486" y="48" width="520" height="58" rx="10"/>
+    <rect class="ring" x="504" y="61" width="56" height="32" rx="9"/>
+    <rect class="card card-cur" x="507" y="64" width="50" height="26" rx="7"/>
+    <text class="t" x="582" y="72">Current step</text>
+    <text class="s" x="582" y="93">where the workflow waits now: ring and CURRENT badge</text>
+
+    <rect class="inner" x="486" y="114" width="520" height="58" rx="10"/>
+    <rect class="card card-pass" x="507" y="130" width="50" height="26" rx="7"/>
+    <circle class="check" cx="555" cy="132" r="8"/>
+    <path class="check-mark" d="M551.5,132.5 l2.5,2.5 l4.5,-5"/>
+    <text class="t" x="582" y="138">Step done</text>
+    <text class="s" x="582" y="159">completed at least once: check badge</text>
+
+    <rect class="inner" x="486" y="180" width="520" height="58" rx="10"/>
+    <path class="e-taken" d="M504,209 H558" marker-end="url(#a-pass)"/>
+    <text class="t" x="582" y="204">Path already taken</text>
+    <text class="s" x="582" y="225">transitions followed so far, in teal</text>
+
+    <rect class="inner" x="486" y="246" width="520" height="58" rx="10"/>
+    <path class="e-next" d="M504,275 H558" marker-end="url(#a-cur)"/>
+    <text class="t" x="582" y="270">Possible next paths</text>
+    <text class="s" x="582" y="291">leaving the current step: thicker, drawn on top</text>
+
+    <rect class="inner" x="486" y="312" width="520" height="58" rx="10"/>
+    <path class="e-tc2" d="M504,333 H558" marker-end="url(#a-tc2)"/>
+    <path class="e-tc1" d="M504,350 H558" marker-end="url(#a-tc1)"/>
+    <text class="t" x="582" y="336">Transition colors</text>
+    <text class="s" x="582" y="357">one color each when a step has several transitions</text>
+
+    <rect class="inner" x="486" y="378" width="520" height="58" rx="10"/>
+    <g class="dim" filter="url(#gray)">
+      <rect class="card" x="507" y="394" width="50" height="26" rx="7"/>
+      <circle class="k-step" cx="520" cy="407" r="5"/>
+    </g>
+    <text class="t" x="582" y="402">Faded</text>
+    <text class="s" x="582" y="423">not done, and can no longer happen</text>
+
+    <rect class="native" x="486" y="452" width="520" height="62" rx="12"/>
+    <text class="t" x="502" y="477">View controls (the graph is read-only)</text>
+    <text class="s" x="502" y="500">+ / − zoom · F fit · C current step · ↓ → direction · drag to pan</text>
+  </g>
+</svg>

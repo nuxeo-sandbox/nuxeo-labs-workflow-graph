@@ -28,8 +28,8 @@ or the transaction is rollback-only). The dialog no longer reads REST endpoints,
 
 Nuxeo may one day audit the followed transitions itself (a possible improvement of Nuxeo: an event fired on the
 attached documents by `GraphRunner`). The plugin then needs a new version (use Nuxeo's entries, stop recording,
-restrict the target Nuxeo versions); the README has a WARNING about the duplicated entries. Keep reading the
-plugin's own event and keys only until then.
+restrict the target Nuxeo versions); the README has a short WARNING about the duplicated entries, the full one is in
+`docs/server-side.md`. Keep reading the plugin's own event and keys only until then.
 
 It is the simple sibling of `nuxeo-labs-custom-workflow-graph` (interactive version: details panel, Studio layout,
 legend...). The two packages conflict (`package.xml`). Names never overlap: namespace `NuxeoLabs.WorkflowGraph`
@@ -158,6 +158,25 @@ references again if the Nuxeo hotfix level changed a lot.
   `.lwg-root`/`.lwg-theme`, so a value set on `html` is never shadowed. Use `var(--_lwg-...)` in the CSS. The
   graph lives in shadow DOM (Web UI's `nuxeo-workflow-graph`, then the dialog): CSS variables are the only
   supported customization; any new public variable must be listed in the README "Colors" table.
+
+## Documentation
+
+Decided with the user (2025.3): the README stays short and user-oriented, the technical details live in `docs/`.
+
+- `README.md`: features, screenshots, "How to read the graph", controls, "How it works" (two flow diagrams + "Good to
+  know"), requirements and installation, Colors (variables table, example), stopping the recorder (Studio XML only),
+  third-party code, support. No long rules, no Java/test details: link to `docs/` instead.
+- `docs/server-side.md`: the recorder (audit entry fields, JSON), who can see the entries, the operation (parameters,
+  response, permissions, audit backends), limits, disabling or replacing the recorder, the full WARNING about Nuxeo
+  recording the transitions one day.
+- `docs/development.md`: integration with Web UI (the `show()` patch and its shadow DOM WARNING, local storage key),
+  data and failures table, exact rules of the graph (colors, history, dimming, opening), architecture tree, tests and
+  tools, build.
+- `README-Images/`: screenshots (PNG) and three hand-written SVG diagrams, standalone (own `<style>`, markers, opaque
+  light background so they read well in GitHub's light and dark themes; no `color-mix()`, no external font):
+  `how-to-read.svg` (example graph + legend), `flow-view-graph.svg` (View Graph flow and failures),
+  `flow-history.svg` (recording). When the behavior they show changes (failures, history, legend, controls), update
+  the SVG and the docs too; check them with `xmllint --noout` and a headless Chrome render at 880 px width.
 
 ## Conventions
 

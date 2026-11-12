@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1148 326" width="1148" height="326" role="img"
+  aria-labelledby="title desc">
+  <title id="title">What happens when the user clicks "View Graph"</title>
+  <desc id="desc">The user clicks View Graph, the plugin opens its dialog, one call to the server returns the graph,
+    the title and the history, the plugin draws the graph, the user sees it. If the server returns an error, the dialog
+    closes with Web UI's usual error message. Without history, the graph is drawn without it. If the graph cannot be
+    drawn, Web UI's usual graph opens instead.</desc>
+  <style><![CDATA[
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      fill: #1f2937; font-size: 14.5px; }
+    .t { font-weight: 650; font-size: 17px; }
+    .s { fill: #5b6474; }
+    .c { text-anchor: middle; }
+    .bg { fill: #f7f8fa; stroke: #d3d9e2; stroke-width: 1; }
+    .plugin { fill: #e1f4f1; stroke: #0d9488; stroke-width: 1.6; }
+    .native { fill: #eef2f7; stroke: #64748b; stroke-width: 1.6; }
+    .ok { fill: #e6f4e8; stroke: #2e7d32; stroke-width: 1.6; }
+    .error { fill: #fdeaea; stroke: #dc2626; stroke-width: 1.6; }
+    .dashed { stroke-dasharray: 6 4; }
+    .ar { fill: none; stroke: #334155; stroke-width: 2; }
+    .ar-err { fill: none; stroke: #dc2626; stroke-width: 2; stroke-dasharray: 6 4; }
+    .num circle { fill: #1f2937; }
+    .num text { fill: #ffffff; font-size: 13px; font-weight: 700; text-anchor: middle; }
+    .lg { font-size: 13.5px; fill: #5b6474; }
+  ]]></style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#334155" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="a-err" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10"
+      markerUnits="userSpaceOnUse" orient="auto"><path fill="#dc2626" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0.5" y="0.5" width="1147" height="325" rx="16"/>
+
+  <g transform="translate(14,14)">
+    <!-- 1 -->
+    <rect class="native" x="10" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="32" cy="42" r="13"/><text x="32" y="46.5">1</text></g>
+    <text class="t c" x="106" y="70">User clicks</text>
+    <text class="t c" x="106" y="92">"View Graph"</text>
+    <text class="s c" x="106" y="118">on a document</text>
+    <text class="s c" x="106" y="137">or a task</text>
+    <path class="ar" d="M202,85 H235" marker-end="url(#a)"/>
+
+    <!-- 2 -->
+    <rect class="plugin" x="237" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="259" cy="42" r="13"/><text x="259" y="46.5">2</text></g>
+    <text class="t c" x="333" y="70">The plugin</text>
+    <text class="t c" x="333" y="92">opens its dialog</text>
+    <text class="s c" x="333" y="118">instead of Web UI's</text>
+    <text class="s c" x="333" y="137">default window</text>
+    <path class="ar" d="M429,85 H462" marker-end="url(#a)"/>
+
+    <!-- 3 -->
+    <rect class="plugin" x="464" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="486" cy="42" r="13"/><text x="486" y="46.5">3</text></g>
+    <text class="t c" x="560" y="70">One call</text>
+    <text class="t c" x="560" y="92">to the server</text>
+    <text class="s c" x="560" y="118">graph, title</text>
+    <text class="s c" x="560" y="137">and history</text>
+    <path class="ar" d="M656,85 H689" marker-end="url(#a)"/>
+
+    <!-- 4 -->
+    <rect class="plugin" x="691" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="713" cy="42" r="13"/><text x="713" y="46.5">4</text></g>
+    <text class="t c" x="787" y="70">It draws</text>
+    <text class="t c" x="787" y="92">the graph</text>
+    <text class="s c" x="787" y="118">automatic layout,</text>
+    <text class="s c" x="787" y="137">top-down or left-right</text>
+    <path class="ar" d="M883,85 H916" marker-end="url(#a)"/>
+
+    <!-- 5 -->
+    <rect class="ok" x="918" y="20" width="192" height="130" rx="12"/>
+    <g class="num"><circle cx="940" cy="42" r="13"/><text x="940" y="46.5">5</text></g>
+    <text class="t c" x="1014" y="70">User sees</text>
+    <text class="t c" x="1014" y="92">the graph</text>
+    <text class="s c" x="1014" y="118">where the workflow is</text>
+    <text class="s c" x="1014" y="137">and the path so far</text>
+
+    <!-- what if -->
+    <path class="ar-err" d="M484,150 V164 Q484,174 474,174 H198 Q188,174 188,184 V194" marker-end="url(#a-err)"/>
+    <rect class="error" x="10" y="196" width="356" height="64" rx="12"/>
+    <text class="t c" x="188" y="222">The server returns an error?</text>
+    <text class="s c" x="188" y="245">Dialog closes, Web UI's usual error message</text>
+
+    <path class="ar dashed" d="M560,150 V194" marker-end="url(#a)"/>
+    <rect class="native dashed" x="382" y="196" width="356" height="64" rx="12"/>
+    <text class="t c" x="560" y="222">No history to show?</text>
+    <text class="s c" x="560" y="245">The graph is drawn without it</text>
+
+    <path class="ar-err" d="M800,150 V194" marker-end="url(#a-err)"/>
+    <rect class="error" x="754" y="196" width="356" height="64" rx="12"/>
+    <text class="t c" x="932" y="222">The graph cannot be drawn?</text>
+    <text class="s c" x="932" y="245">Web UI's usual graph opens instead</text>
+
+    <!-- legend -->
+    <rect class="plugin" x="10" y="280" width="15" height="15" rx="3"/>
+    <text class="lg" x="33" y="292">the plugin (browser or server)</text>
+    <rect class="native" x="250" y="280" width="15" height="15" rx="3"/>
+    <text class="lg" x="273" y="292">Nuxeo / Web UI</text>
+    <rect class="error" x="410" y="280" width="15" height="15" rx="3"/>
+    <text class="lg" x="433" y="292">problem</text>
+  </g>
+</svg>
