@@ -2,12 +2,7 @@
 <package type="addon" name="nuxeo-labs-workflow-graph" version="@VERSION@">
   <title>Nuxeo Labs Workflow Graph</title>
   <description>
-    <p>Replaces the "View Graph" dialog of Nuxeo Web UI with a simple, modern and read-only workflow graph:
-    automatic layout (top to bottom or left to right), themed cards, current step and its next transitions
-    highlighted, steps already done and transitions already followed marked, zoom (buttons, keys, pinch), fit to
-    screen and center on the current step. Server side: records the transitions followed by graph workflows (one
-    audit entry on each document attached to the workflow per completed step), and returns the workflow, its graph
-    and its history to the graph in one call (operation LabsWorkflowGraph.GetWorkflowGraph).</p>
+    <p>Replaces the "View Graph" dialog of Nuxeo Web UI: Top-Bottom/left-Right, Zoom, Fit, Center, etc. Plus server side work (audit entry for transitions)</p>
   </description>
   <vendor>Hyland</vendor>
   <installer restart="true" />
